@@ -16,6 +16,11 @@ Source of truth is the YAML. Never hand-edit `.kicad_sch` / `.kicad_pcb` files �
 After `dotnet tool install --global schgen` the CLI is on `$PATH`:
 
 ```bash
+# One-time per machine: extract KiCad stock libs to ~/.local/share/schgen/kicad-stock/.
+# After this every project on the machine can reference Device:R, Connector:USB_C,
+# etc. without needing its own libs/ copy. Idempotent; safe to re-run.
+schgen install-stock-libs
+
 # Build a project (writes <projectName>.kicad_pro + per-sheet .kicad_sch + .kicad_pcb)
 schgen build path/to/board.yaml --out out/dir/
 
@@ -38,6 +43,16 @@ dotnet run --project /path/to/SchGen/src/Schgen.Cli -- build path/to/board.yaml 
 ```
 
 The CLI exits 0 on success, 1 on validation failure, 2 on argument errors.
+
+### Stock-lib auto-discovery
+
+schgen resolves a symbol like `Device:R` or footprint like `Connector_USB:USB_C_*` by walking, in order:
+
+1. `$XDG_DATA_HOME/schgen/kicad-stock/{symbols,footprints}` (or `~/.local/share/schgen/kicad-stock/...` / `%LOCALAPPDATA%\schgen\kicad-stock\...`) — populated by `schgen install-stock-libs`.
+2. `$KICAD_DATA/{symbols,footprints}` — KiCad's own data-root override.
+3. System install paths (`/usr/share/kicad/`, `~/bin/kicad/squashfs-root/usr/share/kicad/`, `/Applications/KiCad/...`, `C:\Program Files\KiCad\10.0\share\kicad\`, etc.).
+
+Stock symbols and footprints **never** appear in the project's `libraries:` / `footprint_libs:` lists — auto-discovery covers them. Use those YAML keys only for project-local `.kicad_sym` / `.pretty` (parts you author, or vendor parts not in KiCad's stock libs).
 
 ## Mental model
 

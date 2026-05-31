@@ -12,16 +12,23 @@ The YAML is the source of truth. Re-running `schgen build` reproduces the output
 
 ## Install
 
-As a global .NET tool (recommended):
+Two one-time steps per machine — after these, every project on the machine can use `schgen` and reference KiCad stock libraries (`Device:R`, `Connector:USB_C`, etc.) without per-project setup.
 
 ```bash
+# 1. Install the CLI as a global .NET tool.
 git clone <your-fork-or-mirror> ~/Projects/SchGen
 cd ~/Projects/SchGen
 dotnet pack -c Release src/Schgen.Cli
 dotnet tool install --global --add-source ./nupkg SchGen
+
+# 2. Extract KiCad's stock symbol + footprint libs to a shared per-user cache
+#    at ~/.local/share/schgen/kicad-stock/ (XDG-compliant; %LOCALAPPDATA% on Windows).
+#    schgen finds KiCad in standard install locations or any *.AppImage under
+#    ~/bin/kicad/, ~/Applications/, ~/Downloads/.
+schgen install-stock-libs
 ```
 
-After install, `schgen` is on `$PATH`:
+After that, `schgen` is on `$PATH`:
 
 ```bash
 schgen build path/to/board.yaml --out hardware/kicad/board/
@@ -29,7 +36,7 @@ schgen validate path/to/board.yaml
 schgen symbols path/to/Lib.kicad_sym
 ```
 
-Without an install, run from a checkout:
+Without a global install, run from a checkout:
 
 ```bash
 dotnet run --project src/Schgen.Cli -- build path/to/board.yaml --out hardware/kicad/board/
@@ -81,15 +88,23 @@ For production-scale examples, the MyriadArc cartridge-console project (where Sc
 
 3. **Wire into Claude Code** — symlink (or copy) [SKILL.md](SKILL.md) into your project at `.claude/skills/schgen/SKILL.md` so Claude picks up the schgen skill automatically. The SKILL doc covers the YAML schema, the mental model (pin attribution, implicit NC, template instances), the workflow, and the common gotchas.
 
-## KiCad library setup
+## KiCad stock libraries
 
-`schgen` reads `.kicad_sym` and `.pretty` libraries listed in the YAML. KiCad's stock libraries are not bundled — point at your local KiCad install:
+`schgen install-stock-libs` (above) populates a shared per-user cache once per machine. Projects don't need their own `libs/` copy — schgen's auto-discovery walks:
 
-```bash
-scripts/install-libs.sh ~/bin/kicad/kicad-10.0.1-1-x86_64.AppImage
+1. `$XDG_DATA_HOME/schgen/kicad-stock/` (or `~/.local/share/schgen/kicad-stock/` on Linux/macOS, `%LOCALAPPDATA%\schgen\kicad-stock\` on Windows).
+2. `$KICAD_DATA` (KiCad's own data-root env var).
+3. System install locations (`/usr/share/kicad/`, `~/bin/kicad/squashfs-root/usr/share/kicad/`, `/Applications/KiCad/...`, `C:\Program Files\KiCad\10.0\share\kicad\`, etc.).
+
+If any of those resolve, your YAML can reference a stock symbol just by `library_nickname:symbol_name`:
+
+```yaml
+- ref: J1
+  symbol: Connector:USB_C_Receptacle_USB2.0_14P
+  footprint: Connector_USB:USB_C_Receptacle_GCT_USB4085
 ```
 
-(That extracts the AppImage's stock libs to `libs/` for use as `libraries:` / `footprint_libs:` paths. The `libs/` directory is gitignored — it's regenerated from a local KiCad install on demand.)
+No `libraries:` / `footprint_libs:` entry needed for stock parts. Use those YAML keys only for project-local `.kicad_sym` / `.pretty` you author or vendor in.
 
 ## Repo layout
 
@@ -110,7 +125,7 @@ SchGen/
 │   ├── template_params.yaml — one template, four instantiations
 │   └── multi_file/          — `includes:` splitting a board across files
 └── scripts/
-    └── install-libs.sh      — stock KiCad lib extractor
+    └── install-libs.sh      — compat shim; forwards to `schgen install-stock-libs`
 ```
 
 ## Running tests

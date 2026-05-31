@@ -393,21 +393,16 @@ public sealed class LibraryIndex
 
     private static IEnumerable<string> StockRoots(string subdir)
     {
-        // 1. Bundled libs next to the schgen binary.
-        var bundled = Path.Combine(AppContext.BaseDirectory, "libs", subdir);
-        if (Directory.Exists(bundled)) yield return bundled;
-
-        // 1b. Walk up from BaseDirectory looking for a tools/schgen/libs/ - handy
-        //     during `dotnet run` where BaseDirectory is bin/Debug/net9.0/ and the
-        //     real bundle sits at tools/schgen/libs/.
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        for (int i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
+        // 1. Shared per-user cache populated by `schgen install-stock-libs`.
+        //    XDG_DATA_HOME first, then ~/.local/share/schgen/kicad-stock, then
+        //    %LOCALAPPDATA%\schgen\kicad-stock on Windows.
+        foreach (var sharedRoot in SharedCacheRoots())
         {
-            var candidate = Path.Combine(dir.FullName, "libs", subdir);
-            if (Directory.Exists(candidate)) { yield return candidate; break; }
+            var p = Path.Combine(sharedRoot, subdir);
+            if (Directory.Exists(p)) yield return p;
         }
 
-        // 2. $KICAD_DATA env var.
+        // 2. $KICAD_DATA env var (KiCad's own override).
         var env = Environment.GetEnvironmentVariable("KICAD_DATA");
         if (!string.IsNullOrEmpty(env))
         {
@@ -415,7 +410,7 @@ public sealed class LibraryIndex
             if (Directory.Exists(p)) yield return p;
         }
 
-        // 3. Common install paths.
+        // 3. Common install paths (KiCad installed system-wide).
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var candidates = new[]
         {
@@ -432,6 +427,22 @@ public sealed class LibraryIndex
         {
             var p = Path.Combine(c, subdir);
             if (Directory.Exists(p)) yield return p;
+        }
+    }
+
+    private static IEnumerable<string> SharedCacheRoots()
+    {
+        var xdg = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+        if (!string.IsNullOrEmpty(xdg))
+            yield return Path.Combine(xdg, "schgen", "kicad-stock");
+
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        yield return Path.Combine(home, ".local", "share", "schgen", "kicad-stock");
+
+        if (OperatingSystem.IsWindows())
+        {
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            yield return Path.Combine(localAppData, "schgen", "kicad-stock");
         }
     }
 

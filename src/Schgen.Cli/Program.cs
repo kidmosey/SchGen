@@ -16,9 +16,10 @@ public static class Program
         {
             return args[0] switch
             {
-                "build"    => BuildCommand.Run(args[1..]),
-                "validate" => ValidateCommand.Run(args[1..]),
-                "symbols"  => SymbolsCommand.Run(args[1..]),
+                "build"             => BuildCommand.Run(args[1..]),
+                "validate"          => ValidateCommand.Run(args[1..]),
+                "symbols"           => SymbolsCommand.Run(args[1..]),
+                "install-stock-libs"=> InstallStockLibsCommand.Run(args[1..]),
                 "-h" or "--help" or "help" => PrintUsage(),
                 _ => UnknownCommand(args[0]),
             };
@@ -43,9 +44,15 @@ public static class Program
             schgen - KiCad schematic + initial PCB generator
 
             usage:
-              schgen build    <circuit.yaml> --out <dir>
-              schgen validate <circuit.yaml>
-              schgen symbols  <lib.kicad_sym>
+              schgen build              <circuit.yaml> --out <dir> [--lib <path>]...
+              schgen validate           <circuit.yaml>
+              schgen symbols            <lib.kicad_sym>
+              schgen install-stock-libs [--out <path>] [--force]
+
+            One-time setup on a machine:
+              schgen install-stock-libs    # extract KiCad stock libs to a shared cache
+            then any project's YAML can reference Device:R, Connector:USB_C, etc.
+            without needing its own libs/ copy.
             """);
         return 0;
     }
