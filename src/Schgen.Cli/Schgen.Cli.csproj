@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Schgen.Core\Schgen.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>schgen</ToolCommandName>
+    <PackageId>SchGen</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Craig Miller</Authors>
+    <Description>YAML → KiCad 10 schematic + initial PCB generator. Consumes a YAML circuit description and emits an ERC-clean hierarchical schematic plus a .kicad_pcb populated with footprints clustered by sheet.</Description>
+    <PackageOutputPath>../../nupkg</PackageOutputPath>
+  </PropertyGroup>
+
+</Project>

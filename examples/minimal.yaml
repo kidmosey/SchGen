@@ -1,0 +1,55 @@
+# Smallest exerciser for schgen: a single regulator with input and output bypass caps.
+# Two of the three caps share a single host pin → cap-proximity fan-out is exercised.
+
+libraries:
+  - libs/Device.kicad_sym
+
+footprint_libs:
+  - footprints/
+
+config:
+  page_size: A4
+  title: "schgen minimal"
+  rev: "A1"
+  designer: "schgen"
+  grid: 50
+  strict_erc: false
+  pcb_sheet_spacing: 20
+
+power_nets:
+  - GND
+  - VBUS_5V_U1_1
+  - VCC_3V3
+
+sheets:
+  power:
+    components:
+      - ref: U1
+        symbol: Device:Regulator_3V3
+        footprint: Device:SOT-23-3
+        value: "AP2112K-3.3"
+        pins:
+          VIN:  VBUS_5V_U1_1
+          VOUT: VCC_3V3
+
+      - ref: C_IN1
+        symbol: Device:C
+        footprint: Device:C_0805_2012Metric
+        value: "100nF"
+        pins: { 1: VBUS_5V_U1_1, 2: GND }
+
+      - ref: C_IN2
+        symbol: Device:C
+        footprint: Device:C_0805_2012Metric
+        value: "10uF"
+        pins: { 1: VBUS_5V_U1_1, 2: GND }
+
+      - ref: C_OUT
+        symbol: Device:C
+        footprint: Device:C_0805_2012Metric
+        value: "10uF"
+        pins: { 1: VCC_3V3, 2: GND }
+
+root:
+  instantiate:
+    - sheet: power

@@ -1,0 +1,70 @@
+# Exercises template-with-params: a single rc_filter sheet template is
+# instantiated four times, each instance bound to its own VIN / VOUT nets.
+
+libraries:
+  - libs/Device.kicad_sym
+
+footprint_libs:
+  - footprints/
+
+config:
+  page_size: A3
+  title: "schgen template example"
+  rev: "A1"
+  designer: "schgen"
+
+power_nets: [GND, VBUS_5V_U1_1, VCC_3V3]
+
+sheets:
+  power:
+    components:
+      - ref: U1
+        symbol: Device:Regulator_3V3
+        footprint: Device:SOT-23-3
+        value: "AP2112K-3.3"
+        pins:
+          VIN:  VBUS_5V_U1_1
+          VOUT: VCC_3V3
+      - ref: C_IN
+        symbol: Device:C
+        footprint: Device:C_0805_2012Metric
+        value: "10uF"
+        pins: { 1: VBUS_5V_U1_1, 2: GND }
+      - ref: C_OUT
+        symbol: Device:C
+        footprint: Device:C_0805_2012Metric
+        value: "10uF"
+        pins: { 1: VCC_3V3, 2: GND }
+
+  rc_filter:
+    template: true
+    ports:
+      VIN:  { dir: passive }
+      VOUT: { dir: passive }
+    components:
+      - ref: R1
+        symbol: Device:R
+        footprint: Device:C_0805_2012Metric        # 0805 stand-in
+        value: "100R"
+        pins: { 1: VIN, 2: VOUT }
+      - ref: C1
+        symbol: Device:C
+        footprint: Device:C_0805_2012Metric
+        value: "100nF"
+        pins: { 1: VOUT, 2: GND }
+
+root:
+  instantiate:
+    - sheet: power
+    - sheet: rc_filter
+      as: FILT1
+      params: { VIN: VCC_3V3, VOUT: V_FILT1 }
+    - sheet: rc_filter
+      as: FILT2
+      params: { VIN: VCC_3V3, VOUT: V_FILT2 }
+    - sheet: rc_filter
+      as: FILT3
+      params: { VIN: VCC_3V3, VOUT: V_FILT3 }
+    - sheet: rc_filter
+      as: FILT4
+      params: { VIN: VCC_3V3, VOUT: V_FILT4 }
