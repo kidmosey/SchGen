@@ -63,7 +63,9 @@ ls out/
 # board.kicad_pro  board.kicad_sch  board.kicad_pcb  rc.kicad_sch
 ```
 
-See [`examples/minimal.yaml`](examples/minimal.yaml) for the smallest exerciser and [`examples/template_params.yaml`](examples/template_params.yaml) for templates with parameter remapping (one filter template, four instantiations).
+See [`examples/minimal.yaml`](examples/minimal.yaml) for the smallest exerciser, [`examples/template_params.yaml`](examples/template_params.yaml) for templates with parameter remapping, and [`examples/multi_file/`](examples/multi_file/) for a board split across multiple YAML files using `includes:`.
+
+For production-scale examples, the MyriadArc cartridge-console project (where SchGen was extracted from) has five live board YAMLs under [`hardware/kicad/`](https://github.com/your-org/MyriadArc.com/tree/main/hardware/kicad) — cart-pcb, cart-programmer, cart-row-pcb, console-board, and console-programmer. They exercise multi-unit symbols, BGAs with `bulk:` pin attribution, hierarchical sheets via `includes:`, real PMICs / SoCs / FPGAs, and the `host:` cap-proximity override across hundreds of components.
 
 ## Consuming from another project
 
@@ -94,14 +96,19 @@ scripts/install-libs.sh ~/bin/kicad/kicad-10.0.1-1-x86_64.AppImage
 ```
 SchGen/
 ├── README.md                — this file
-├── SKILL.md                 — full reference (Claude skill format; symlink into consumers)
+├── SKILL.md                 — full YAML schema + diagnostics reference (Claude skill format; symlink into consumers)
+├── DESIGN.md                — rationale behind the major design decisions
+├── LICENSE                  — Apache-2.0
 ├── Schgen.sln               — VS / Rider solution
 ├── src/
 │   ├── Schgen.Cli/          — CLI entrypoint + commands (build/validate/symbols)
 │   └── Schgen.Core/         — YAML model + KiCad emitters + placer
 ├── tests/
-│   └── Schgen.Tests/        — xUnit suite
-├── examples/                — minimal.yaml, usb_hub.yaml + bundled libs
+│   └── Schgen.Tests/        — xUnit suite (87 tests)
+├── examples/
+│   ├── minimal.yaml         — smallest single-sheet exerciser
+│   ├── template_params.yaml — one template, four instantiations
+│   └── multi_file/          — `includes:` splitting a board across files
 └── scripts/
     └── install-libs.sh      — stock KiCad lib extractor
 ```
@@ -114,8 +121,8 @@ dotnet test
 
 ## License
 
-(unset — add a LICENSE before publishing.)
+Apache-2.0. See [LICENSE](LICENSE).
 
 ## Provenance
 
-SchGen was extracted from the MyriadArc cartridge-console project in May 2026 where it generated five production board YAMLs (cart-pcb, cart-programmer, cart-row-pcb, console-board, console-programmer). The full reference docs (YAML schema, label-rendering rules, cap-proximity rules, common gotchas) live in [SKILL.md](SKILL.md).
+SchGen was extracted from the MyriadArc cartridge-console project in May 2026 where it generated five production board YAMLs (cart-pcb, cart-programmer, cart-row-pcb, console-board, console-programmer). The full reference docs (YAML schema, label-rendering rules, cap-proximity rules, diagnostics reference) live in [SKILL.md](SKILL.md). The rationale behind the major design decisions (why YAML, why source-verbatim symbol embedding, why net-naming as cluster signal, what schgen explicitly does not do) lives in [DESIGN.md](DESIGN.md).

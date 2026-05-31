@@ -1,0 +1,31 @@
+# Multi-file YAML: top-level board.yaml pulls sheet definitions in from
+# sub-files via `includes:`. Demonstrates how a real board can split
+# across files (power.yaml, filters.yaml, ...) and still build as one
+# project. Path resolution: each `includes:` entry is relative to the
+# file that lists it.
+
+libraries:
+  - ../libs/Device.kicad_sym
+
+footprint_libs:
+  - ../footprints/
+
+config:
+  page_size: A3
+  title: "schgen multi-file example"
+  rev: "A1"
+  designer: "schgen"
+
+power_nets: [GND, VBUS_5V_U1_1, VCC_3V3]
+
+includes:
+  - power.yaml
+  - filters.yaml
+
+root:
+  instantiate:
+    - sheet: power
+    - { sheet: rc_filter, as: FILT1, params: { VIN: VCC_3V3, VOUT: V_FILT1 } }
+    - { sheet: rc_filter, as: FILT2, params: { VIN: VCC_3V3, VOUT: V_FILT2 } }
+    - { sheet: rc_filter, as: FILT3, params: { VIN: VCC_3V3, VOUT: V_FILT3 } }
+    - { sheet: rc_filter, as: FILT4, params: { VIN: VCC_3V3, VOUT: V_FILT4 } }

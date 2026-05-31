@@ -19,6 +19,11 @@ After `dotnet tool install --global schgen` the CLI is on `$PATH`:
 # Build a project (writes <projectName>.kicad_pro + per-sheet .kicad_sch + .kicad_pcb)
 schgen build path/to/board.yaml --out out/dir/
 
+# Append additional symbol libs at build time without editing the YAML.
+# Repeat --lib for multiple extras. Useful for fast iteration when proving
+# out a new symbol before committing the path to libraries:.
+schgen build board.yaml --out out/ --lib /path/to/Extra.kicad_sym --lib /path/to/Another.kicad_sym
+
 # Validate without writing
 schgen validate path/to/board.yaml
 
@@ -192,17 +197,62 @@ sheets:
    ```
    `lib_symbol_mismatch` and `lib_footprint_mismatch` are pre-silenced in the generated `.kicad_pro` since schgen embeds source-verbatim symbols.
 
-## Common gotchas
+## Diagnostics reference
+
+Every error / warning the validator emits, grouped by category. ERC issues raised by KiCad after build are at the bottom.
+
+### Symbol & footprint resolution
+
+| Message | Cause | Fix |
+|---|---|---|
+| `symbol 'Foo:Bar' not found in any loaded library` | `libraries:` doesn't list the `.kicad_sym` containing Foo:Bar | Add the path to `libraries:`. Paths resolve relative to the YAML file. |
+| `R: unit U not present in symbol 'L:S' (units available: ...)` | YAML declares `unit: U` but the symbol has fewer units | Either drop `unit:` (defaults to 1) or pick a unit number the symbol actually has. |
+| `R unit U: symbol 'L:S' has no pin named or numbered 'P'` | YAML pin name / number doesn't exist on the symbol | Run `schgen symbols <lib>` to dump real pin names; fall back to pin numbers. |
+| `R unit U: pin name 'VSS' is ambiguous on symbol 'L:S' (N pins share this name)` | BGAs with multiple `VSS` / `VDD` / `GND` pins on the same name | Use pin numbers (`bulk:` form is best). |
+| `R: footprint 'L:F' not found in any loaded footprint library` | `footprint_libs:` doesn't include the `.pretty` containing F | Add the `.pretty` directory to `footprint_libs:`. |
+| `R: no footprint specified` | Component has `symbol:` but no `footprint:` | Add a `footprint:` field; PCB placement skips parts with no footprint. |
+
+### Component & sheet structure
+
+| Message | Cause | Fix |
+|---|---|---|
+| `sheet 'X': component has empty ref` | A component entry omits `ref:` | Add a refdes (e.g. `ref: R1`). |
+| `sheet 'X': refdes collision: 'R' unit U is declared more than once` | Two components on the same sheet share `(ref, unit)` | Rename one, or move them onto separate units of a multi-unit symbol. |
+| `sheet 'X' is instantiated N times but is not marked template:true` | Reusing a sheet across multiple instances | Add `template: true` and declare `ports:` for the cross-sheet contract. |
+| `sheet 'X' is template:true but declares no ports` (warning) | Template sheet has no `ports:` block | Add `ports:` — without them, instances cannot connect to anything outside the sheet. |
+| `root: instantiates unknown sheet 'X'` | `root.instantiate:` references a sheet name that isn't in `sheets:` (after `includes:` expansion) | Check the sheet name spelling; if it lives in an included file, make sure the include is wired. |
+| `root: instance 'I' passes param 'P' but sheet 'X' has no such port` | `params:` key doesn't match any name in the template's `ports:` | Reconcile the param name with the template's port declaration. |
+
+### `host:` (cap-proximity manual override)
+
+| Message | Cause | Fix |
+|---|---|---|
+| `sheet 'X': R.host = 'A.B' is malformed; expected '<refdes>.<pin>'` | `host:` value isn't `refdes.pin` | Use the dotted form, e.g. `host: U1.VIN`. |
+| `sheet 'X': R.host = 'A.B' but no component 'A' on this sheet` | Host refdes doesn't exist on the same sheet | Host must be on the same sheet — re-home one or the other. |
+| `sheet 'X': R.host = 'A.B' but A has no net assigned on pin 'B'` | Host pin isn't attributed to a net (explicitly or via auto-bind) | Attribute the host pin's net or fix the pin name. |
+| `sheet 'X': R.host = 'A.B' but R has no pin on any of host pin B's nets` | The passive doesn't share a net with the host pin | Either drop `host:` or wire one of the passive's pins to the host's net. |
+
+### `power_nets:` / auto-bind
+
+| Message | Cause | Fix |
+|---|---|---|
+| `power_net 'X' is declared but never appears as a pin attribution` (warning) | `power_nets:` lists a name nothing references | Remove it from `power_nets:`, or attribute it to a real pin. |
+| `R unit U pin P (N): redundant explicit attribution to power_net 'X' - pin name 'N' already auto-binds to 'X'` | YAML explicitly writes `GND: GND` (or similar) when the symbol's pin name already maps to that power net | Delete the redundant entry; auto-bind does the work. |
+| `R unit U pin P (N): YAML attributes pin to 'X' but pin name 'N' auto-binds to 'Y'` | Conflict between YAML attribution and symbol's pin-name → power-net resolution | One of: YAML is wrong, symbol pin name is wrong, or `power_net_aliases` entry is wrong. Reconcile. |
+
+### Cap-proximity placement (no message — visual cue)
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `symbol 'Foo:Bar' not found in any loaded library` | `libraries:` doesn't list the .kicad_sym containing Foo:Bar | Add the path to `libraries:`. Paths are resolved relative to the YAML file. |
-| `symbol 'X' has no pin named or numbered 'Y'` | YAML uses a pin name that doesn't exist on the symbol | Run `schgen symbols` to dump the actual pin names; use pin numbers as a fallback. |
-| `pin name 'VSS' is ambiguous on symbol 'X' (N pins share this name)` | Common on BGAs where many pins share `VSS`/`VDD`/`GND` | Use pin numbers in the YAML (`bulk:` form is best for this). |
-| `sheet 'foo' is instantiated N times but is not marked template:true` | Reusing a sheet across multiple instances | Add `template: true` and declare `ports:` for the cross-sheet contract. |
-| `isolated_pin_label` (ERC warning) on a global label | The net appears at only one pin endpoint in the whole design | Either declare a downstream consumer or accept the warning. |
-| Decoupling cap ends up far from its IC | The bypass net has more than one non-passive endpoint, so the proximity rule doesn't fire | Give the cap a dedicated stub net (e.g. `VCC_3V3_U_SOC_A1` instead of generic `VCC_3V3`); put both the IC pin and the cap pin on that stub. |
-| `power_pin_not_driven` ERC error | A net has only `power_in` endpoints and isn't in `power_nets:` so didn't get auto-flagged | If it's a real power rail, add to `power_nets:`. The placer auto-emits PWR_FLAG. |
+| Decoupling cap ends up far from its IC pin | The bypass net has more than one non-passive endpoint, so the proximity rule doesn't fire | Give the cap a dedicated stub net (e.g. `VCC_3V3_U_SOC_A1` instead of generic `VCC_3V3`); put both the IC pin and the cap pin on that stub. Alternatively use `host: U_SOC.A1` on the cap to force proximity. |
+
+### KiCad ERC (after build)
+
+| Message | Cause | Fix |
+|---|---|---|
+| `isolated_pin_label` (warning) on a global label | The net appears at only one pin endpoint in the whole design | Either declare a downstream consumer or accept the warning. |
+| `power_pin_not_driven` (error) | A net has only `power_in` endpoints and isn't in `power_nets:` so didn't get auto-flagged | If it's a real power rail, add to `power_nets:`. The placer auto-emits PWR_FLAG. |
+| `lib_symbol_mismatch` / `lib_footprint_mismatch` | n/a — these are pre-silenced in the generated `.kicad_pro` | schgen embeds symbols/footprints verbatim, so the upstream-library version is intentionally not consulted. |
 
 ## Code structure (for reference / edits)
 

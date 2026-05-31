@@ -1,0 +1,21 @@
+# Filter template, included from board.yaml. Defines one parametric
+# sheet (`rc_filter`) that the parent file instantiates four times with
+# distinct VIN / VOUT nets.
+
+sheets:
+  rc_filter:
+    template: true
+    ports:
+      VIN:  { dir: passive }
+      VOUT: { dir: passive }
+    components:
+      - ref: R1
+        symbol: Device:R
+        footprint: Device:C_0805_2012Metric        # 0805 stand-in
+        value: "100R"
+        pins: { 1: VIN, 2: VOUT }
+      - ref: C1
+        symbol: Device:C
+        footprint: Device:C_0805_2012Metric
+        value: "100nF"
+        pins: { 1: VOUT, 2: GND }

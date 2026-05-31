@@ -16,6 +16,7 @@
     <Version>0.1.0</Version>
     <Authors>Craig Miller</Authors>
     <Description>YAML → KiCad 10 schematic + initial PCB generator. Consumes a YAML circuit description and emits an ERC-clean hierarchical schematic plus a .kicad_pcb populated with footprints clustered by sheet.</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageOutputPath>../../nupkg</PackageOutputPath>
   </PropertyGroup>
 
