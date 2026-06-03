@@ -67,6 +67,9 @@ public static class BuildCommand
         // the library to know each symbol's unit count). Must run before the
         // multi-unit field consolidation + validation.
         YamlLoader.ExpandAllUnits(doc, libs);
+        // Re-bind power nets now that all units exist (FromDocument's first pass
+        // only saw the single pre-expansion entry's unit 1).
+        libs.AutoBindPowerNets(doc);
         YamlLoader.ConsolidateMultiUnitFields(doc);
 
         var report = Validator.Validate(doc, libs);

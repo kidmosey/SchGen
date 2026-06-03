@@ -77,6 +77,13 @@ public sealed class LibraryIndex
         return idx;
     }
 
+    /// Re-run power-net auto-bind against the current document. Needed after
+    /// ExpandAllUnits: FromDocument's initial auto-bind only saw the single
+    /// pre-expansion `units: all` entry (unit 1), so units 2..N had no power
+    /// pins bound until the clones exist. Idempotent - already-assigned pins
+    /// are skipped.
+    public void AutoBindPowerNets(CircuitDocument doc) => ApplyPowerNetPinAutoBind(doc, this);
+
     /// For each component with a `host:` attribute, generate a deterministic
     /// stub net and patch the passive's anchor pin + the host pin's net list.
     /// Call AFTER `FromDocument` and AFTER `Validator.Validate` (host:

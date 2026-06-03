@@ -549,6 +549,14 @@ public static class YamlLoader
                     ?? throw new InvalidOperationException(
                         $"units: all on {comp.Ref}: symbol '{comp.Symbol}' not found");
                 int n = Math.Max(1, sym.UnitCount);
+                // Each clone gets its OWN copy of the user-authored pins, with
+                // any pins added by the pre-expansion auto-bind pass stripped
+                // out - so the post-expansion auto-bind re-binds power per unit
+                // cleanly (and marks each clone's AutoBoundPinIds, keeping the
+                // redundant-attribution check happy).
+                var userPins = comp.Pins
+                    .Where(kv => !comp.AutoBoundPinIds.Contains(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
                 for (int u = 1; u <= n; u++)
                     expanded.Add(new ComponentDef
                     {
@@ -558,7 +566,8 @@ public static class YamlLoader
                         Voltage = comp.Voltage, Datasheet = comp.Datasheet, Dnp = comp.Dnp,
                         PcbAt = comp.PcbAt, PcbRotate = comp.PcbRotate,
                         SchAt = comp.SchAt, SchRotate = comp.SchRotate,
-                        Pins = comp.Pins, Host = comp.Host,
+                        Pins = userPins.ToDictionary(kv => kv.Key, kv => new List<string>(kv.Value), StringComparer.Ordinal),
+                        Host = comp.Host,
                         Variants = new List<string>(comp.Variants),
                     });
             }

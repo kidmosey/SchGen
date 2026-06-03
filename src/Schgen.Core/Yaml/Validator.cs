@@ -57,8 +57,31 @@ public static class Validator
                 var numberLookup = unitPins
                     .ToDictionary(p => p.Number, p => p, StringComparer.Ordinal);
 
+                // `units: all` clones share ONE pins map across every unit, so a
+                // pin that belongs to another unit is expected here - validate
+                // existence symbol-wide and let the emitter place each pin on its
+                // own unit. Non-AllUnits components are still checked per unit.
+                HashSet<string>? allNumbers = null, allNames = null;
+                if (comp.AllUnits)
+                {
+                    allNumbers = new HashSet<string>(StringComparer.Ordinal);
+                    allNames = new HashSet<string>(StringComparer.Ordinal);
+                    for (int u = 1; u <= sym.UnitCount; u++)
+                        foreach (var p in sym.PinsOfUnit(u))
+                        {
+                            allNumbers.Add(p.Number);
+                            if (!string.IsNullOrEmpty(p.Name)) allNames.Add(p.Name);
+                        }
+                }
+
                 foreach (var (pinId, _) in comp.Pins)
                 {
+                    if (comp.AllUnits)
+                    {
+                        if (allNumbers!.Contains(pinId) || allNames!.Contains(pinId)) continue;
+                        r.Errors.Add($"{comp.Ref}: symbol '{comp.Symbol}' has no pin named or numbered '{pinId}'");
+                        continue;
+                    }
                     if (numberLookup.ContainsKey(pinId)) continue;
                     if (nameLookup.TryGetValue(pinId, out var matches))
                     {
