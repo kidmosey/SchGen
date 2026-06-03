@@ -240,6 +240,35 @@ public class ValidatorTests
                     StubFootprintLibrary("Capacitor_SMD", "C_0805") });
 
     [Fact]
+    public void ExpandAllUnits_clones_one_entry_per_symbol_unit()
+    {
+        const string Yaml = """
+            sheets:
+              power:
+                components:
+                  - ref: U1
+                    symbol: Device:DUAL
+                    footprint: Package_TO:SOT-23
+                    units: all
+                    value: BIGCHIP
+                    pins: { VDD: V1P5, VSS: GND }
+            root:
+              instantiate:
+                - sheet: power
+            """;
+        var doc = YamlLoader.LoadText(Yaml);
+        doc.Sheets["power"].Components.Should().ContainSingle(c => c.AllUnits);
+
+        YamlLoader.ExpandAllUnits(doc, MakeLibsWithDual());
+
+        var u1s = doc.Sheets["power"].Components.Where(c => c.Ref == "U1").ToList();
+        u1s.Should().HaveCount(2);                                  // Device:DUAL has 2 units
+        u1s.Select(c => c.Unit).Should().BeEquivalentTo(new[] { 1, 2 });
+        u1s.Should().OnlyContain(c => c.Value == "BIGCHIP");        // shared identity
+        u1s.Should().OnlyContain(c => c.Pins.ContainsKey("VDD"));   // shared pins map
+    }
+
+    [Fact]
     public void Pin_in_other_unit_is_reported_as_missing()
     {
         // Component declares unit 1, but only unit 2 has the pin name

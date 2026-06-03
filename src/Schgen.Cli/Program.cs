@@ -17,6 +17,7 @@ public static class Program
             return args[0] switch
             {
                 "build"             => BuildCommand.Run(args[1..]),
+                "bom"               => BomCommand.Run(args[1..]),
                 "validate"          => ValidateCommand.Run(args[1..]),
                 "symbols"           => SymbolsCommand.Run(args[1..]),
                 "install-stock-libs"=> InstallStockLibsCommand.Run(args[1..]),
@@ -44,7 +45,8 @@ public static class Program
             schgen - KiCad schematic + initial PCB generator
 
             usage:
-              schgen build              <circuit.yaml> --out <dir> [--lib <path>]...
+              schgen build              <circuit.yaml> --out <dir> [--variant <name>] [--lib <path>]...
+              schgen bom                <circuit.yaml> [--variant <name>] [-o <out.csv>]
               schgen validate           <circuit.yaml>
               schgen symbols            <lib.kicad_sym>
               schgen install-stock-libs [--out <path>] [--force]

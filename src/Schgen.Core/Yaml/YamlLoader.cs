@@ -108,6 +108,7 @@ public static class YamlLoader
                     SchRotate    = comp.SchRotate,
                     Pins         = newPins,
                     Host         = newHost,
+                    Variants     = new List<string>(comp.Variants),
                 });
             }
 
@@ -306,6 +307,20 @@ public static class YamlLoader
             }
         }
 
+        if (TryMap(map, "parts", out var partsNode) && partsNode is YamlMappingNode partsMap)
+        {
+            foreach (var e in partsMap.Children)
+            {
+                var key = ScalarString(e.Key);
+                if (e.Value is YamlMappingNode pm)
+                    doc.Parts[key] = new PartInfo
+                    {
+                        Mpn          = OptString(pm, "mpn", ""),
+                        Manufacturer = OptString(pm, "manufacturer", ""),
+                    };
+            }
+        }
+
         if (TryMap(map, "sheets", out var sh) && sh is YamlMappingNode shMap)
         {
             foreach (var entry in shMap.Children)
@@ -348,6 +363,7 @@ public static class YamlLoader
         {
             Name     = name,
             Template = OptBool(m, "template", false),
+            Variants = OptStringList(m, "variants"),
         };
         if (TryMap(m, "ports", out var pnode) && pnode is YamlMappingNode pmap)
         {
@@ -511,7 +527,67 @@ public static class YamlLoader
             SchRotate    = OptDoubleOpt(m, "sch_rotate"),
             Pins         = pins,
             Host         = OptStringOpt(m, "host"),
+            Variants     = OptStringList(m, "variants"),
+            AllUnits     = string.Equals(OptStringOpt(m, "units"), "all", StringComparison.OrdinalIgnoreCase),
         };
+    }
+
+    /// Expand each `units: all` component into one ComponentDef per unit of its
+    /// symbol, cloning the shared pins/identity fields. Run after the library
+    /// index is built (it needs the symbol's unit count). Each clone keeps the
+    /// same pins map; downstream per-unit wiring + auto-bind pick out the pins
+    /// that actually belong to each unit, so one entry captures the whole part.
+    public static void ExpandAllUnits(CircuitDocument doc, LibraryIndex libs)
+    {
+        foreach (var sheet in doc.Sheets.Values)
+        {
+            var expanded = new List<ComponentDef>();
+            foreach (var comp in sheet.Components)
+            {
+                if (!comp.AllUnits) { expanded.Add(comp); continue; }
+                var sym = libs.ResolveSymbol(comp.Symbol)
+                    ?? throw new InvalidOperationException(
+                        $"units: all on {comp.Ref}: symbol '{comp.Symbol}' not found");
+                int n = Math.Max(1, sym.UnitCount);
+                for (int u = 1; u <= n; u++)
+                    expanded.Add(new ComponentDef
+                    {
+                        Ref = comp.Ref, Symbol = comp.Symbol, Unit = u, AllUnits = true,
+                        Footprint = comp.Footprint, Value = comp.Value, Mpn = comp.Mpn,
+                        Manufacturer = comp.Manufacturer, Tolerance = comp.Tolerance,
+                        Voltage = comp.Voltage, Datasheet = comp.Datasheet, Dnp = comp.Dnp,
+                        PcbAt = comp.PcbAt, PcbRotate = comp.PcbRotate,
+                        SchAt = comp.SchAt, SchRotate = comp.SchRotate,
+                        Pins = comp.Pins, Host = comp.Host,
+                        Variants = new List<string>(comp.Variants),
+                    });
+            }
+            sheet.Components.Clear();
+            sheet.Components.AddRange(expanded);
+        }
+    }
+
+    /// Apply a stuff-variant filter: keep only sheets/components populated in
+    /// `variant`. A sheet/component with an empty Variants list is shared (kept
+    /// in every variant). A component inherits its sheet's Variants when its own
+    /// is empty. Sheets dropped here are also removed from root.instantiate.
+    /// Run after ExpandTemplateInstances so per-instance sheets exist.
+    public static void FilterVariant(CircuitDocument doc, string variant)
+    {
+        bool InVariant(List<string> tags) => tags.Count == 0 || tags.Contains(variant);
+
+        var dropped = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (name, sheet) in doc.Sheets)
+            if (!InVariant(sheet.Variants)) dropped.Add(name);
+        foreach (var name in dropped) doc.Sheets.Remove(name);
+
+        foreach (var sheet in doc.Sheets.Values)
+        {
+            sheet.Components.RemoveAll(c =>
+                !InVariant(c.Variants.Count > 0 ? c.Variants : sheet.Variants));
+        }
+
+        doc.Root.Instantiate.RemoveAll(i => dropped.Contains(i.Sheet) || dropped.Contains(i.EffectiveName));
     }
 
     // -- helpers --
@@ -532,6 +608,19 @@ public static class YamlLoader
 
     private static string? OptStringOpt(YamlMappingNode m, string key) =>
         TryMap(m, key, out var n) ? ScalarString(n) : null;
+
+    /// Parse `key: a` or `key: [a, b]` into a list (empty if absent).
+    private static List<string> OptStringList(YamlMappingNode m, string key)
+    {
+        var list = new List<string>();
+        if (!TryMap(m, key, out var n)) return list;
+        if (n is YamlSequenceNode seq)
+            foreach (var item in seq.Children) list.Add(ScalarString(item));
+        else
+            foreach (var s in ScalarString(n).Split(',').Select(s => s.Trim()).Where(s => s.Length > 0))
+                list.Add(s);
+        return list;
+    }
 
     private static double OptDouble(YamlMappingNode m, string key, double defaultValue)
     {

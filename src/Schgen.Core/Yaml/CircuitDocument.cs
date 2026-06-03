@@ -21,6 +21,12 @@ public sealed class CircuitDocument
     public Dictionary<string, List<string>> PowerNetAliases { get; init; } =
         new(StringComparer.Ordinal);
 
+    /// Optional parts catalog: part-name (a component's value, or the symbol
+    /// name when value is blank) -> sourcing info. Lets the BOM carry real
+    /// MPNs authored once per distinct part instead of repeated on every one of
+    /// hundreds of component instances. A component's own `mpn:` still wins.
+    public Dictionary<string, PartInfo> Parts { get; init; } = new(StringComparer.Ordinal);
+
     public Dictionary<string, SheetDef> Sheets { get; init; } = new(StringComparer.Ordinal);
     public RootSheet Root { get; init; } = new();
     public string SourcePath { get; init; } = "";
@@ -51,6 +57,18 @@ public sealed class SheetDef
     public bool Template { get; init; }
     public Dictionary<string, PortDef> Ports { get; init; } = new(StringComparer.Ordinal);
     public List<ComponentDef> Components { get; init; } = new();
+
+    /// Stuff-variant tags. Empty = shared (present in every variant). Non-empty
+    /// = this sheet (and its components, unless they override) is populated only
+    /// in the listed assembly variants. `schgen build --variant X` drops sheets
+    /// whose Variants is non-empty and does not contain X.
+    public List<string> Variants { get; init; } = new();
+}
+
+public sealed class PartInfo
+{
+    public string Mpn { get; init; } = "";
+    public string Manufacturer { get; init; } = "";
 }
 
 public sealed class PortDef
@@ -67,6 +85,12 @@ public sealed class ComponentDef
     /// (this is how a multi-unit chip - e.g. a 11-unit FPGA - is expressed:
     /// one ComponentDef per unit, all with the same Ref).
     public int Unit { get; init; } = 1;
+    /// When true (YAML `units: all`), this single ComponentDef stands in for
+    /// every unit of its multi-unit symbol: ExpandAllUnits clones it into one
+    /// entry per symbol unit (sharing this pins map). Lets a big multi-unit
+    /// part (e.g. a 565-ball SoC across 8 sub-units) be wired from one entry,
+    /// with by-name pins + power_net_aliases resolving per unit.
+    public bool AllUnits { get; init; }
     // Identity / BOM fields below are settable (not init-only) because they
     // belong to the whole symbol, not the unit: `ConsolidateMultiUnitFields`
     // stamps a single canonical value across every unit sharing this Ref so
@@ -112,6 +136,12 @@ public sealed class ComponentDef
     /// net. Multi-host passives (e.g. between two chips on a shared signal)
     /// leave this null and stay flat.
     public string? Host { get; init; }
+
+    /// Per-component stuff-variant override. Empty = inherit the sheet's
+    /// Variants (shared if that is also empty). Non-empty = populated only in
+    /// the listed variants regardless of the sheet (e.g. the bare-silicon-only
+    /// regulators living on a shared power sheet).
+    public List<string> Variants { get; init; } = new();
 }
 
 public sealed class RootSheet
