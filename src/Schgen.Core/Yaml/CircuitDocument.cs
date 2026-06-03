@@ -57,12 +57,6 @@ public sealed class SheetDef
     public bool Template { get; init; }
     public Dictionary<string, PortDef> Ports { get; init; } = new(StringComparer.Ordinal);
     public List<ComponentDef> Components { get; init; } = new();
-
-    /// Stuff-variant tags. Empty = shared (present in every variant). Non-empty
-    /// = this sheet (and its components, unless they override) is populated only
-    /// in the listed assembly variants. `schgen build --variant X` drops sheets
-    /// whose Variants is non-empty and does not contain X.
-    public List<string> Variants { get; init; } = new();
 }
 
 public sealed class PartInfo
@@ -103,10 +97,6 @@ public sealed class ComponentDef
     public string? Voltage { get; set; }
     public string? Datasheet { get; set; }
     public bool Dnp { get; set; }
-    public (double X, double Y)? PcbAt { get; init; }
-    public double? PcbRotate { get; init; }
-    public (double X, double Y)? SchAt { get; init; }
-    public double? SchRotate { get; init; }
     /// pin_id (name or number) -> list of net names. Built from `pins:` and
     /// `pins.bulk:`. The first entry in each list is the canonical electrical
     /// net used for PCB pad-to-net assignment; subsequent entries are
@@ -136,12 +126,6 @@ public sealed class ComponentDef
     /// net. Multi-host passives (e.g. between two chips on a shared signal)
     /// leave this null and stay flat.
     public string? Host { get; init; }
-
-    /// Per-component stuff-variant override. Empty = inherit the sheet's
-    /// Variants (shared if that is also empty). Non-empty = populated only in
-    /// the listed variants regardless of the sheet (e.g. the bare-silicon-only
-    /// regulators living on a shared power sheet).
-    public List<string> Variants { get; init; } = new();
 }
 
 public sealed class RootSheet

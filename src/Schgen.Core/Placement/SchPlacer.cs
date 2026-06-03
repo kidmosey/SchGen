@@ -37,8 +37,7 @@ namespace Schgen.Core.Placement;
 /// 4. Shelf-pack: each UC's expanded rect (or standalone-passive rect) is
 ///    one tile. Tiles flow left-to-right, wrap rows at page width with a
 ///    2 mm gap between tiles and between rows. Final layout re-centred
-///    around (0, 0). Tiles whose anchor uses `sch_at` are pinned and not
-///    packed/re-centred.
+///    around (0, 0).
 /// Diagnostic tracer for the placer. Pass an instance to `SchPlacer.Tracer`
 /// to capture every decision the cluster-builder makes about a host-anchored
 /// passive: which net is iterated for each source pin, which endpoints make
@@ -154,8 +153,6 @@ public sealed class SchPlacer
     ///       frontier = placedThisPass
     ///
     /// Clusters are laid out along +X. Unanchored passives become singletons.
-    /// `sch_at` on a UC pins its cluster at the user's coords and excludes
-    /// it from the post-place shelf-pack.
     private void PlaceSheetExpanded(SheetDef sheet, SheetLayout layout)
     {
         var components = sheet.Components
@@ -179,7 +176,7 @@ public sealed class SchPlacer
         foreach (var (comp, sym) in components)
         {
             var key = Key(comp);
-            double rot = comp.SchRotate ?? 0;
+            double rot = 0;
             fanoutAtOrigin[key] = FanoutGeometry.Compute(sym, comp, rot, 0, 0, hiddenStubs, labelKinds);
 
             var unitPins = sym.PinsOfUnit(comp.Unit);
@@ -277,7 +274,7 @@ public sealed class SchPlacer
             Tracer.Trace("standalone",
                 $"sheet={sheet.Name} cap={comp.Ref}#{comp.Unit} " +
                 $"host={comp.Host ?? "<none>"} pins=[{pinSummary}]");
-            double rot = comp.SchRotate ?? 0;
+            double rot = 0;
             var fanZero = fanoutAtOrigin[key];
             double x = cursorX - fanZero.MinX;
             double y = -fanZero.MinY;
@@ -335,7 +332,7 @@ public sealed class SchPlacer
         const double slideMargin = 2.0;
         var ucComp = compByKey[ucKey];
         var ucSym  = symByKey[ucKey];
-        double ucRot = ucComp.SchRotate ?? 0;
+        double ucRot = 0;
         string ucRef = ucComp.Ref;
 
         var local = new Dictionary<string, (double X, double Y, double Rot)>(StringComparer.Ordinal);
@@ -516,22 +513,10 @@ public sealed class SchPlacer
             frontier = nextFrontier;
         }
 
-        // Translate cluster. If the UC declared `sch_at`, center the cluster
-        // on those coords (and skip advancing cursorX so it stays out of the
-        // shelf-pack flow - PackExpandedRectsOntoSheet treats SchAt-bearing
-        // tiles as pinned). Otherwise lay the cluster out left-to-right with
-        // cursorX, bottom-aligned at Y=0.
-        double dx, dy;
-        if (ucComp.SchAt is { } anchor)
-        {
-            dx = anchor.X;  // UC is at (0, 0) in cluster coords, so dx/dy = anchor coords
-            dy = anchor.Y;
-        }
-        else
-        {
-            dx = cursorX - expansion.MinX;
-            dy = -expansion.MinY;
-        }
+        // Translate cluster: lay it out left-to-right with cursorX,
+        // bottom-aligned at Y=0.
+        double dx = cursorX - expansion.MinX;
+        double dy = -expansion.MinY;
         foreach (var (key, p) in local)
         {
             double tx = p.X + dx;
@@ -541,8 +526,7 @@ public sealed class SchPlacer
             placedGlobal.Add(key);
             tileMembers[ucKey].Add(key);
         }
-        if (ucComp.SchAt is null)
-            cursorX += (expansion.MaxX - expansion.MinX) + clusterGap;
+        cursorX += (expansion.MaxX - expansion.MinX) + clusterGap;
     }
 
     /// Recursion depth cap for the cap-routing collision search. 12 hops
@@ -651,14 +635,6 @@ public sealed class SchPlacer
     /// Translates each tile's component coords to their packed positions.
     private void PackTilesForUnitAspect(SheetLayout layout, Dictionary<string, List<string>> tileMembers)
     {
-        // Tiles whose UC declared `sch_at` are pinned at user-specified coords;
-        // they stay out of the shelf-pack and the post-pack re-centering so
-        // the user's explicit placement survives.
-        var pinnedRefs = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (_, sheetDef) in _doc.Sheets)
-            foreach (var c in sheetDef.Components)
-                if (c.SchAt is not null) pinnedRefs.Add(c.Ref);
-
         var tiles = new List<(string OwnerKey, BBox Bbox, List<ComponentPlacement> Comps)>();
         foreach (var (ownerKey, memberKeys) in tileMembers)
         {
@@ -666,7 +642,6 @@ public sealed class SchPlacer
                                   .Select(k => layout.Components[k])
                                   .ToList();
             if (comps.Count == 0) continue;
-            if (comps.Any(p => pinnedRefs.Contains(p.Ref))) continue;   // pinned: skip pack
             double minX = comps.Min(p => p.EffectiveBBox.MinX);
             double maxX = comps.Max(p => p.EffectiveBBox.MaxX);
             double minY = comps.Min(p => p.EffectiveBBox.MinY);
@@ -719,12 +694,7 @@ public sealed class SchPlacer
     private void PackExpandedRectsOntoSheet(SheetLayout layout, Dictionary<string, List<string>> tileMembers)
     {
         // Build a "tile" record per owner key.
-        var tiles = new List<(string OwnerKey, BBox Bbox, List<ComponentPlacement> Comps, bool Pinned)>();
-        var fixedRefs = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (_, sheetDef) in _doc.Sheets)
-            foreach (var c in sheetDef.Components)
-                if (c.SchAt is not null) fixedRefs.Add(c.Ref);
-
+        var tiles = new List<(string OwnerKey, BBox Bbox, List<ComponentPlacement> Comps)>();
         foreach (var (ownerKey, memberKeys) in tileMembers)
         {
             var comps = memberKeys.Where(k => layout.Components.ContainsKey(k))
@@ -737,14 +707,11 @@ public sealed class SchPlacer
             double maxX = comps.Max(p => p.EffectiveBBox.MaxX);
             double minY = comps.Min(p => p.EffectiveBBox.MinY);
             double maxY = comps.Max(p => p.EffectiveBBox.MaxY);
-            bool pinned = comps.Any(p => fixedRefs.Contains(p.Ref));
-            tiles.Add((ownerKey, new BBox(minX, minY, maxX, maxY), comps, pinned));
+            tiles.Add((ownerKey, new BBox(minX, minY, maxX, maxY), comps));
         }
 
-        // Pinned tiles stay where they are. Pack the rest by descending
-        // height for stable shelf packing.
-        var movable = tiles.Where(t => !t.Pinned).ToList();
-        movable.Sort((a, b) =>
+        // Pack tiles by descending height for stable shelf packing.
+        tiles.Sort((a, b) =>
         {
             int cmp = b.Bbox.Height.CompareTo(a.Bbox.Height);
             return cmp != 0 ? cmp : string.CompareOrdinal(a.OwnerKey, b.OwnerKey);
@@ -756,7 +723,7 @@ public sealed class SchPlacer
         const double shelfGap = 2.0;
         double cursorX = 0, cursorY = 0, shelfHeight = 0;
 
-        foreach (var (ownerKey, bbox, comps, _) in movable)
+        foreach (var (ownerKey, bbox, comps) in tiles)
         {
             if (cursorX > 0 && cursorX + bbox.Width > targetWidth)
             {
@@ -773,16 +740,16 @@ public sealed class SchPlacer
             shelfHeight = Math.Max(shelfHeight, bbox.Height);
         }
 
-        // Re-centre the MOVABLE set around (0, 0). Pinned tiles keep YAML coords.
-        var movableComps = movable.SelectMany(t => t.Comps).ToList();
-        if (movableComps.Count == 0) return;
-        double mMinX = movableComps.Min(p => p.BoundingBox.MinX);
-        double mMaxX = movableComps.Max(p => p.BoundingBox.MaxX);
-        double mMinY = movableComps.Min(p => p.BoundingBox.MinY);
-        double mMaxY = movableComps.Max(p => p.BoundingBox.MaxY);
+        // Re-centre the packed set around (0, 0).
+        var allComps = tiles.SelectMany(t => t.Comps).ToList();
+        if (allComps.Count == 0) return;
+        double mMinX = allComps.Min(p => p.BoundingBox.MinX);
+        double mMaxX = allComps.Max(p => p.BoundingBox.MaxX);
+        double mMinY = allComps.Min(p => p.BoundingBox.MinY);
+        double mMaxY = allComps.Max(p => p.BoundingBox.MaxY);
         double shiftX = -(mMinX + mMaxX) * 0.5;
         double shiftY = -(mMinY + mMaxY) * 0.5;
-        foreach (var p in movableComps)
+        foreach (var p in allComps)
             TranslateComponent(p, shiftX, shiftY);
     }
 

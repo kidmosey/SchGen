@@ -102,13 +102,8 @@ public static class YamlLoader
                     Voltage      = comp.Voltage,
                     Datasheet    = comp.Datasheet,
                     Dnp          = comp.Dnp,
-                    PcbAt        = comp.PcbAt,
-                    PcbRotate    = comp.PcbRotate,
-                    SchAt        = comp.SchAt,
-                    SchRotate    = comp.SchRotate,
                     Pins         = newPins,
                     Host         = newHost,
-                    Variants     = new List<string>(comp.Variants),
                 });
             }
 
@@ -363,7 +358,6 @@ public static class YamlLoader
         {
             Name     = name,
             Template = OptBool(m, "template", false),
-            Variants = OptStringList(m, "variants"),
         };
         if (TryMap(m, "ports", out var pnode) && pnode is YamlMappingNode pmap)
         {
@@ -521,13 +515,8 @@ public static class YamlLoader
             Voltage      = OptStringOpt(m, "voltage"),
             Datasheet    = OptStringOpt(m, "datasheet"),
             Dnp          = OptBool(m, "dnp", false),
-            PcbAt        = OptPair(m, "pcb_at"),
-            PcbRotate    = OptDoubleOpt(m, "pcb_rotate"),
-            SchAt        = OptPair(m, "sch_at"),
-            SchRotate    = OptDoubleOpt(m, "sch_rotate"),
             Pins         = pins,
             Host         = OptStringOpt(m, "host"),
-            Variants     = OptStringList(m, "variants"),
             AllUnits     = string.Equals(OptStringOpt(m, "units"), "all", StringComparison.OrdinalIgnoreCase),
         };
     }
@@ -564,39 +553,13 @@ public static class YamlLoader
                         Footprint = comp.Footprint, Value = comp.Value, Mpn = comp.Mpn,
                         Manufacturer = comp.Manufacturer, Tolerance = comp.Tolerance,
                         Voltage = comp.Voltage, Datasheet = comp.Datasheet, Dnp = comp.Dnp,
-                        PcbAt = comp.PcbAt, PcbRotate = comp.PcbRotate,
-                        SchAt = comp.SchAt, SchRotate = comp.SchRotate,
                         Pins = userPins.ToDictionary(kv => kv.Key, kv => new List<string>(kv.Value), StringComparer.Ordinal),
                         Host = comp.Host,
-                        Variants = new List<string>(comp.Variants),
                     });
             }
             sheet.Components.Clear();
             sheet.Components.AddRange(expanded);
         }
-    }
-
-    /// Apply a stuff-variant filter: keep only sheets/components populated in
-    /// `variant`. A sheet/component with an empty Variants list is shared (kept
-    /// in every variant). A component inherits its sheet's Variants when its own
-    /// is empty. Sheets dropped here are also removed from root.instantiate.
-    /// Run after ExpandTemplateInstances so per-instance sheets exist.
-    public static void FilterVariant(CircuitDocument doc, string variant)
-    {
-        bool InVariant(List<string> tags) => tags.Count == 0 || tags.Contains(variant);
-
-        var dropped = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (name, sheet) in doc.Sheets)
-            if (!InVariant(sheet.Variants)) dropped.Add(name);
-        foreach (var name in dropped) doc.Sheets.Remove(name);
-
-        foreach (var sheet in doc.Sheets.Values)
-        {
-            sheet.Components.RemoveAll(c =>
-                !InVariant(c.Variants.Count > 0 ? c.Variants : sheet.Variants));
-        }
-
-        doc.Root.Instantiate.RemoveAll(i => dropped.Contains(i.Sheet) || dropped.Contains(i.EffectiveName));
     }
 
     // -- helpers --
@@ -618,28 +581,9 @@ public static class YamlLoader
     private static string? OptStringOpt(YamlMappingNode m, string key) =>
         TryMap(m, key, out var n) ? ScalarString(n) : null;
 
-    /// Parse `key: a` or `key: [a, b]` into a list (empty if absent).
-    private static List<string> OptStringList(YamlMappingNode m, string key)
-    {
-        var list = new List<string>();
-        if (!TryMap(m, key, out var n)) return list;
-        if (n is YamlSequenceNode seq)
-            foreach (var item in seq.Children) list.Add(ScalarString(item));
-        else
-            foreach (var s in ScalarString(n).Split(',').Select(s => s.Trim()).Where(s => s.Length > 0))
-                list.Add(s);
-        return list;
-    }
-
     private static double OptDouble(YamlMappingNode m, string key, double defaultValue)
     {
         if (!TryMap(m, key, out var n)) return defaultValue;
-        return double.Parse(ScalarString(n), CultureInfo.InvariantCulture);
-    }
-
-    private static double? OptDoubleOpt(YamlMappingNode m, string key)
-    {
-        if (!TryMap(m, key, out var n)) return null;
         return double.Parse(ScalarString(n), CultureInfo.InvariantCulture);
     }
 
@@ -648,16 +592,6 @@ public static class YamlLoader
         if (!TryMap(m, key, out var n)) return defaultValue;
         var s = ScalarString(n).Trim().ToLowerInvariant();
         return s is "true" or "yes" or "1" or "on";
-    }
-
-    private static (double, double)? OptPair(YamlMappingNode m, string key)
-    {
-        if (!TryMap(m, key, out var n)) return null;
-        if (n is not YamlSequenceNode seq || seq.Children.Count != 2)
-            throw new FormatException($"'{key}': expected [x, y]");
-        var x = double.Parse(ScalarString(seq.Children[0]), CultureInfo.InvariantCulture);
-        var y = double.Parse(ScalarString(seq.Children[1]), CultureInfo.InvariantCulture);
-        return (x, y);
     }
 
     private static string ResolveRelative(string baseDir, string p) =>

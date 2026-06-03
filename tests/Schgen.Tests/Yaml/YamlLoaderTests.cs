@@ -497,34 +497,6 @@ public class YamlLoaderTests
         report.Errors.Should().Contain(e => e.Contains("malformed"));
     }
 
-    [Fact]
-    public void Parses_overrides()
-    {
-        const string OverrideYaml = """
-            sheets:
-              io:
-                components:
-                  - ref: J_EDGE
-                    symbol: Connector:DSUB
-                    footprint: Connector_Dsub:DSUB-9
-                    pcb_at: [10.0, 50.0]
-                    pcb_rotate: 90
-                    sch_at: [120, 80]
-                    dnp: false
-                    pins:
-                      1: SIG1
-            root:
-              instantiate:
-                - sheet: io
-            """;
-        var doc = YamlLoader.LoadText(OverrideYaml);
-        var j = doc.Sheets["io"].Components[0];
-        j.PcbAt.Should().Be((10.0, 50.0));
-        j.PcbRotate.Should().Be(90);
-        j.SchAt.Should().Be((120.0, 80.0));
-        j.Dnp.Should().BeFalse();
-    }
-
     // A multi-unit symbol is authored one ComponentDef per unit; typically
     // only the first unit declares value/datasheet/etc. KiCad treats those as
     // symbol-wide, so ConsolidateMultiUnitFields must fan them out to every
@@ -595,54 +567,6 @@ public class YamlLoaderTests
         var doc = YamlLoader.LoadText(Conflict);
         var act = () => YamlLoader.ConsolidateMultiUnitFields(doc);
         act.Should().Throw<FormatException>().WithMessage("*conflicting value*");
-    }
-
-    [Fact]
-    public void FilterVariant_keeps_shared_and_matching_sheets_and_components()
-    {
-        const string Yaml = """
-            sheets:
-              power:
-                components:
-                  - ref: U_IN
-                    symbol: Device:Regulator
-                    footprint: fp
-                    pins: { VIN: V5 }
-                  - ref: U_CORE
-                    symbol: Device:Regulator
-                    footprint: fp
-                    variants: [prod]
-                    pins: { VIN: V5 }
-              soc:
-                variants: [prod]
-                components:
-                  - ref: U1
-                    symbol: Device:R
-                    footprint: fp
-                    pins: { 1: A }
-              mezz:
-                variants: [dev]
-                components:
-                  - ref: M1
-                    symbol: Device:R
-                    footprint: fp
-                    pins: { 1: A }
-            root:
-              instantiate:
-                - sheet: power
-                - sheet: soc
-                - sheet: mezz
-            """;
-        var dev = YamlLoader.LoadText(Yaml);
-        YamlLoader.FilterVariant(dev, "dev");
-        dev.Sheets.Keys.Should().BeEquivalentTo(new[] { "power", "mezz" });   // soc (prod) dropped
-        dev.Sheets["power"].Components.Select(c => c.Ref).Should().BeEquivalentTo(new[] { "U_IN" }); // U_CORE (prod) dropped
-        dev.Root.Instantiate.Select(i => i.Sheet).Should().BeEquivalentTo(new[] { "power", "mezz" });
-
-        var prod = YamlLoader.LoadText(Yaml);
-        YamlLoader.FilterVariant(prod, "prod");
-        prod.Sheets.Keys.Should().BeEquivalentTo(new[] { "power", "soc" });   // mezz (dev) dropped
-        prod.Sheets["power"].Components.Select(c => c.Ref).Should().BeEquivalentTo(new[] { "U_IN", "U_CORE" });
     }
 
     [Fact]

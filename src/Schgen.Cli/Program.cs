@@ -45,8 +45,8 @@ public static class Program
             schgen - KiCad schematic + initial PCB generator
 
             usage:
-              schgen build              <circuit.yaml> --out <dir> [--variant <name>] [--lib <path>]...
-              schgen bom                <circuit.yaml> [--variant <name>] [-o <out.csv>]
+              schgen build              <circuit.yaml> --out <dir> [--lib <path>]... [--schematic-only]
+              schgen bom                <circuit.yaml> [-o <out.csv>]
               schgen validate           <circuit.yaml>
               schgen symbols            <lib.kicad_sym>
               schgen install-stock-libs [--out <path>] [--force]

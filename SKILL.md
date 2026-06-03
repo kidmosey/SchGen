@@ -32,14 +32,8 @@ schgen build board.yaml --out out/ --lib /path/to/Extra.kicad_sym --lib /path/to
 # Build only the schematic, leaving any existing .kicad_pcb untouched.
 schgen build board.yaml --out out/ --schematic-only      # or --sch-only
 
-# Build one assembly stuff-variant: drops sheets/components not populated in
-# <name> and suffixes the project name with -<name> (see "Stuff-variants").
-schgen build board.yaml --out out/ --variant prod
-
 # Generate a grouped bill of materials (CSV) to a file, or stdout if no -o.
-# --variant restricts the BOM to one stuff-variant's populated parts.
 schgen bom board.yaml -o board-bom.csv
-schgen bom board.yaml --variant prod -o board-prod-bom.csv
 
 # Validate without writing
 schgen validate path/to/board.yaml
@@ -52,8 +46,8 @@ Full argument reference:
 
 | Command | Required | Optional |
 |---|---|---|
-| `build <circuit.yaml>` | `--out`/`-o <dir>` | `--lib <path>` (repeatable), `--variant <name>`, `--schematic-only` / `--sch-only` |
-| `bom <circuit.yaml>` | — | `--variant <name>`, `-o` / `--out <out.csv>` (default stdout) |
+| `build <circuit.yaml>` | `--out`/`-o <dir>` | `--lib <path>` (repeatable), `--schematic-only` / `--sch-only` |
+| `bom <circuit.yaml>` | — | `-o` / `--out <out.csv>` (default stdout) |
 | `validate <circuit.yaml>` | — | — |
 | `symbols <lib.kicad_sym>` | — | — |
 | `install-stock-libs` | — | `--out <path>`, `--force` |
@@ -178,18 +172,6 @@ sheets:
           GND:  GND
 ```
 
-### Per-component overrides
-
-```yaml
-- ref: J_EDGE
-  symbol: Connector:DSUB
-  footprint: Connector_Dsub:DSUB-9_Horizontal
-  pcb_at: [10.0, 50.0]             # fixed PCB position (mm), bypasses placer
-  pcb_rotate: 90
-  sch_at: [120, 80]                # fixed schematic position (mm)
-  pins: { 1: SIG1, 2: SIG2, SHIELD: SHELL }
-```
-
 ### High pin-count parts (`bulk:` / `named:` mix)
 
 ```yaml
@@ -224,45 +206,47 @@ entry.
   pins: { 1A1: GND, VDD: VCC_1V8 }
 ```
 
-### Stuff-variants (`variants:`)
+### Board variants (use `includes:`, not a feature)
 
-Tag sheets and/or components with the assembly variants they're populated in.
-`schgen build --variant X` (and `schgen bom --variant X`) keeps only what's
-populated in X; the build also suffixes the project name with `-X`. Tagging
-rules:
-
-- **Empty / absent `variants:`** = shared — present in every variant.
-- **Sheet `variants: [a, b]`** — the whole sheet (and its components) is dropped
-  unless the chosen variant is `a` or `b`; the sheet is also removed from
-  `root.instantiate`.
-- **Component `variants: [...]`** — overrides the sheet for that one component
-  (e.g. a bare-silicon-only regulator on an otherwise-shared power sheet).
-  A component with empty `variants:` inherits its sheet's tags.
+For two boards that share most of a design (e.g. a dev variant with module
+sockets vs a prod variant with the equivalent bare silicon), put the shared
+parts in a common file and `includes:` it from one thin file per variant. Each
+variant file adds only its own sheet(s) and its own `root.instantiate`. There
+is no special "variant" mechanism — just plain includes:
 
 ```yaml
+# console-board-common.yaml  (the shared 90%)
+libraries: [ ... ]
+parts: { ... }
 sheets:
-  power:                            # shared sheet
-    components:
-      - ref: U_IN                   # shared (present in every variant)
-        symbol: Device:Regulator
-        footprint: fp
-        pins: { VIN: V5 }
-      - ref: U_CORE
-        symbol: Device:Regulator
-        footprint: fp
-        variants: [prod]            # only in the "prod" variant
-        pins: { VIN: V5 }
-  mezz:
-    variants: [dev]                 # whole sheet only in the "dev" variant
-    components: [ ... ]
+  power:    { ... }
+  io:       { ... }
+  usb_port: { template: true, ... }
+
+# console-board-dev.yaml
+includes: [console-board-common.yaml]
+sheets:
+  mezz: { ... }                     # dev-only sheet
+root:
+  instantiate: [ {sheet: power}, {sheet: io}, {sheet: mezz}, ... ]
+
+# console-board-prod.yaml
+includes: [console-board-common.yaml]
+sheets:
+  soc:  { ... }                     # prod-only sheets
+  fpga: { ... }
+root:
+  instantiate: [ {sheet: power}, {sheet: io}, {sheet: soc}, {sheet: fpga}, ... ]
 ```
+
+Build each with its own file: `schgen build console-board-dev.yaml --out dev/`.
 
 ## How PCB placement works
 
 - **Sheets are placement clusters.** Each YAML sheet becomes one cluster on the PCB. Inside a cluster, the chip with the most pads anchors at the cluster origin and every other component places radially around it based on net connectivity to the anchor. The cluster's bounding box is then arranged on the board.
 - **Cluster arrangement.** The largest-area cluster (typically the SoC sheet) sits at the board centre. The remaining clusters arrange around it in order of cluster-cluster shared-net count, using the same collision-avoiding hop walk that places components within a cluster. Multi-unit chips that span sheets are assigned to one owner sheet — whichever contributes the most pad-net wiring.
 - **Edge-class clusters** (sheets dominated by board-edge connectors — USB, microSD, HDMI, barrel jack, RJ45, audio jack) are detected by symbol-library prefix and placed against the nearest free board edge instead of in the radial flow. No YAML annotation needed.
-- **`pcb_at` overrides still apply.** A `pcb_at` on the cluster's anchor PINS the whole cluster to that absolute board coordinate. A `pcb_at` on a peripheral pins just that one component. Both bypass the cluster placer for the pinned component while everything else continues to auto-layout.
+- **schgen owns placement.** There is no YAML mechanism to pin a component to absolute coordinates — the auto-placer positions every part. Final placement adjustments are made in KiCad after generation.
 
 ## How nets work
 

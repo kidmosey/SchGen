@@ -123,30 +123,4 @@ public class MultiUnitTests
         u1.PadToNet["1"].Should().Be("IN_A");
         u1.PadToNet["5"].Should().Be("MID");
     }
-
-    [Fact]
-    public void Sch_at_override_lands_anchor_at_exact_coords()
-    {
-        const string yaml = """
-            sheets:
-              s:
-                components:
-                  - ref: U1
-                    symbol: Device:DualOpAmp
-                    unit: 1
-                    sch_at: [40.0, 25.0]
-                    sch_rotate: 90
-                    pins: { 1: IN_A, 2: GND, 3: OUT }
-            root:
-              instantiate: [{ sheet: s }]
-            """;
-        var doc = YamlLoader.LoadText(yaml);
-        var libs = LibraryIndex.FromLibraries(
-            new[] { SymbolLibrary.FromText(MultiUnitLib, "Device") });
-        var sch = new SchPlacer(doc, libs).Run();
-        var u1 = sch.Sheets["s"].FindByRef("U1")!;
-        u1.X.Should().Be(40.0);
-        u1.Y.Should().Be(25.0);
-        u1.Rotation.Should().Be(90);
-    }
 }

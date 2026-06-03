@@ -30,8 +30,7 @@ public sealed class FootprintPlacement
 /// every other component in the sheet is placed just outside the anchor's
 /// bbox, in the direction of the centroid of the anchor pads it shares nets
 /// with. Multi-unit chips that span sheets are assigned to one "owner" sheet
-/// (the one where they have the most pad connections). Manual `pcb_at`
-/// overrides always bypass the auto-placer.
+/// (the one where they have the most pad connections).
 ///
 /// Clusters are then arranged on the board: the largest-area cluster anchors
 /// at the board centre and the rest are placed around it using the same
@@ -66,20 +65,16 @@ public sealed class PcbPlacer
 
         ArrangeClusters(clusters);
 
-        // Translate each cluster's local-frame footprint coords to board
-        // frame. Refs in `AbsoluteRefs` keep their stored coords verbatim —
-        // those are user-supplied `pcb_at` values, which the contract guarantees
-        // are absolute board-frame.
+        // Translate each cluster's local-frame footprint coords to board frame.
         foreach (var cluster in clusters)
             foreach (var fp in cluster.Local.Footprints)
             {
-                bool isAbsolute = cluster.AbsoluteRefs.Contains(fp.Ref);
                 result.Footprints.Add(new FootprintPlacement
                 {
                     Ref            = fp.Ref,
                     FootprintLibId = fp.FootprintLibId,
-                    X              = isAbsolute ? fp.X : cluster.GlobalX + fp.X,
-                    Y              = isAbsolute ? fp.Y : cluster.GlobalY + fp.Y,
+                    X              = cluster.GlobalX + fp.X,
+                    Y              = cluster.GlobalY + fp.Y,
                     Rotation       = fp.Rotation,
                     Value          = fp.Value,
                     PadToNet       = fp.PadToNet,
@@ -108,16 +103,6 @@ public sealed class PcbPlacer
         /// Owned refs (assigned to this sheet as their home). Used during
         /// cluster-cluster scoring without having to walk Local.Footprints.
         public required HashSet<string> Refs { get; init; }
-        /// Refs whose pcb_at override pins them to absolute board-frame
-        /// coordinates. They appear in Local.Footprints at the absolute coord
-        /// directly; emission skips the GlobalX/Y translation for these. This
-        /// keeps the user-facing `pcb_at` semantics unchanged from the
-        /// pre-cluster design.
-        public HashSet<string> AbsoluteRefs { get; } = new(StringComparer.Ordinal);
-        /// When the cluster's anchor itself has a pcb_at, the entire cluster
-        /// gets pinned: ArrangeClusters sets GlobalX/Y so the anchor (which
-        /// lives at local origin (0, 0)) lands at this absolute coordinate.
-        public (double X, double Y)? PinTarget { get; init; }
     }
 
     /// Aggregated state for one sheet's placement pass. Same shape as the
@@ -134,7 +119,6 @@ public sealed class PcbPlacer
         public required FootprintDef? AnchorFp { get; init; }
         public required double AnchorX { get; init; }
         public required double AnchorY { get; init; }
-        public required double AnchorRot { get; init; }
         public required double AnchorHalfX { get; init; }
         public required double AnchorHalfY { get; init; }
         public required Dictionary<string, (double X, double Y)> AnchorPadPos { get; init; }
@@ -224,12 +208,8 @@ public sealed class PcbPlacer
 
         var anchorComp = byRef[anchorRef].OrderBy(t => t.Comp.Unit).First().Comp;
         var anchorFp = fpByRefLocal[anchorRef];
-        // Anchor always sits at (0, 0) cluster-local. A pcb_at on the anchor
-        // PINS the cluster's global origin to that absolute board coordinate
-        // (handled in ArrangeClusters); a pcb_at on a peripheral marks that
-        // peripheral as absolute-positioned (handled in PlacePeripheral). In
-        // both cases the local layout math stays unchanged.
-        double anchorRot = anchorComp.PcbRotate ?? 0;
+        // Anchor always sits at (0, 0) cluster-local; ArrangeClusters assigns
+        // the cluster's board-frame origin.
         double anchorHalfX = anchorFp is null ? 5.0 : anchorFp.BoundingBox.Width * 0.5;
         double anchorHalfY = anchorFp is null ? 5.0 : anchorFp.BoundingBox.Height * 0.5;
 
@@ -257,28 +237,23 @@ public sealed class PcbPlacer
             AnchorFp = anchorFp,
             AnchorX = 0.0,
             AnchorY = 0.0,
-            AnchorRot = anchorRot,
             AnchorHalfX = anchorHalfX,
             AnchorHalfY = anchorHalfY,
             AnchorPadPos = anchorPadPos,
         };
 
         var local = new PcbPlacement();
-        var absoluteRefs = new HashSet<string>(StringComparer.Ordinal);
         PlaceAnchor(local, ctx);
-        // Anchor with pcb_at PINS the cluster (handled by ArrangeClusters via
-        // PinTarget); the anchor itself stays at local (0, 0).
         foreach (var refDes in SortPeripheralsByConnectivity(ctx))
-            PlacePeripheral(local, ctx, refDes, absoluteRefs);
+            PlacePeripheral(local, ctx, refDes);
 
-        var bbox = ComputeBBox(local, absoluteRefs);
+        var bbox = ComputeBBox(local);
 
         var nets = new HashSet<string>(StringComparer.Ordinal);
         foreach (var r in ownedRefs)
             foreach (var net in padToNetByRef[r].Values)
                 if (net != "NC") nets.Add(net);
 
-        (double X, double Y)? pinTarget = anchorComp.PcbAt is { } pa ? (pa.X, pa.Y) : null;
         var cluster = new PcbCluster
         {
             SheetName = sheetName,
@@ -286,10 +261,8 @@ public sealed class PcbPlacer
             IsEdgeCluster = DetectEdgeCluster(ownedRefs, byRefAll),
             Nets = nets,
             Refs = ownedRefs,
-            PinTarget = pinTarget,
         };
         cluster.Local.Footprints.AddRange(local.Footprints);
-        foreach (var r in absoluteRefs) cluster.AbsoluteRefs.Add(r);
         return cluster;
     }
 
@@ -308,26 +281,11 @@ public sealed class PcbPlacer
     {
         if (clusters.Count == 0) return;
 
-        // Pinned clusters (anchor has pcb_at) land at their absolute target
-        // first — they're the user's manual placement override at cluster
-        // granularity. Everything else routes around them.
-        var pinned = clusters.Where(c => c.PinTarget is not null).ToList();
-        var unpinned = clusters.Where(c => c.PinTarget is null).ToList();
-
-        foreach (var p in pinned)
-        {
-            var t = p.PinTarget!.Value;
-            p.GlobalX = t.X;
-            p.GlobalY = t.Y;
-        }
-
-        if (unpinned.Count == 0) return;
-
-        // 1. Main anchor cluster among unpinned: largest local bbox area,
-        //    tiebreak by ref count then sheet name. Edge-class clusters never
-        //    win this even if their area is largest.
-        var nonEdge = unpinned.Where(c => !c.IsEdgeCluster).ToList();
-        var pool = nonEdge.Count > 0 ? nonEdge : unpinned;
+        // 1. Main anchor cluster: largest local bbox area, tiebreak by ref
+        //    count then sheet name. Edge-class clusters never win this even
+        //    if their area is largest.
+        var nonEdge = clusters.Where(c => !c.IsEdgeCluster).ToList();
+        var pool = nonEdge.Count > 0 ? nonEdge : clusters;
         var main = pool
             .OrderByDescending(c => c.LocalBBox.Width * c.LocalBBox.Height)
             .ThenByDescending(c => c.Refs.Count)
@@ -338,9 +296,8 @@ public sealed class PcbPlacer
         main.GlobalY = PcbCenterY - main.LocalBBox.CenterY;
 
         // 2. Place the rest. Non-edge clusters by shared-net count (most
-        //    coupled first), then edge clusters last. Pinned clusters
-        //    participate in collision tracking but aren't re-placed.
-        var rest = unpinned.Where(c => c != main).ToList();
+        //    coupled first), then edge clusters last.
+        var rest = clusters.Where(c => c != main).ToList();
         var ordered = rest
             .OrderBy(c => c.IsEdgeCluster ? 1 : 0)
             .ThenByDescending(c => CountSharedClusterNets(c, main))
@@ -348,7 +305,6 @@ public sealed class PcbPlacer
             .ToList();
 
         var placedAsObstacles = new List<PcbCluster>();
-        placedAsObstacles.AddRange(pinned);
         placedAsObstacles.Add(main);
         foreach (var cluster in ordered)
         {
@@ -608,7 +564,7 @@ public sealed class PcbPlacer
             FootprintLibId = ctx.AnchorComp.Footprint,
             X              = ctx.AnchorX,
             Y              = ctx.AnchorY,
-            Rotation       = ctx.AnchorRot,
+            Rotation       = 0,
             Value          = ctx.AnchorComp.Value,
             PadToNet       = ctx.PadToNetByRef[ctx.AnchorRef],
             Def            = ctx.AnchorFp,
@@ -626,41 +582,29 @@ public sealed class PcbPlacer
             .Select(t => t.Ref);
     }
 
-    private static void PlacePeripheral(PcbPlacement result, PcbContext ctx, string refDes, HashSet<string> absoluteRefs)
+    private static void PlacePeripheral(PcbPlacement result, PcbContext ctx, string refDes)
     {
         var first = ctx.ByRef[refDes].OrderBy(t => t.Comp.Unit).First().Comp;
         var fp = ctx.FpByRef[refDes];
 
-        double x, y, rot;
-        if (first.PcbAt is { } at)
-        {
-            x = at.X;
-            y = at.Y;
-            rot = first.PcbRotate ?? 0;
-            absoluteRefs.Add(refDes);
-        }
-        else
-        {
-            var (dirX, dirY) = DirectionToAnchorCentroid(ctx, refDes);
+        var (dirX, dirY) = DirectionToAnchorCentroid(ctx, refDes);
 
-            double pHalfX = fp is null ? 2.5 : fp.BoundingBox.Width  * 0.5;
-            double pHalfY = fp is null ? 2.5 : fp.BoundingBox.Height * 0.5;
+        double pHalfX = fp is null ? 2.5 : fp.BoundingBox.Width  * 0.5;
+        double pHalfY = fp is null ? 2.5 : fp.BoundingBox.Height * 0.5;
 
-            double anchorExtentInDir = Math.Abs(dirX) * ctx.AnchorHalfX + Math.Abs(dirY) * ctx.AnchorHalfY;
-            double pExtentInDir      = Math.Abs(dirX) * pHalfX          + Math.Abs(dirY) * pHalfY;
-            const double seedClearance = 1.5;
-            double natX = ctx.AnchorX + dirX * (anchorExtentInDir + pExtentInDir + seedClearance);
-            double natY = ctx.AnchorY + dirY * (anchorExtentInDir + pExtentInDir + seedClearance);
+        double anchorExtentInDir = Math.Abs(dirX) * ctx.AnchorHalfX + Math.Abs(dirY) * ctx.AnchorHalfY;
+        double pExtentInDir      = Math.Abs(dirX) * pHalfX          + Math.Abs(dirY) * pHalfY;
+        const double seedClearance = 1.5;
+        double natX = ctx.AnchorX + dirX * (anchorExtentInDir + pExtentInDir + seedClearance);
+        double natY = ctx.AnchorY + dirY * (anchorExtentInDir + pExtentInDir + seedClearance);
 
-            BBox candidateBB = fp?.BoundingBox ?? SyntheticBBox(pHalfX, pHalfY);
-            var bestPos = FindClosestFreeSlot(result, candidateBB, natX, natY, dirX, dirY);
-            // No free slot inside the per-cluster depth limit: take the
-            // natural position anyway. Cluster placement absorbs the spill
-            // (every cluster's bbox already accounts for these stragglers).
-            x = bestPos?.X ?? natX;
-            y = bestPos?.Y ?? natY;
-            rot = first.PcbRotate ?? 0;
-        }
+        BBox candidateBB = fp?.BoundingBox ?? SyntheticBBox(pHalfX, pHalfY);
+        var bestPos = FindClosestFreeSlot(result, candidateBB, natX, natY, dirX, dirY);
+        // No free slot inside the per-cluster depth limit: take the
+        // natural position anyway. Cluster placement absorbs the spill
+        // (every cluster's bbox already accounts for these stragglers).
+        double x = bestPos?.X ?? natX;
+        double y = bestPos?.Y ?? natY;
 
         result.Footprints.Add(new FootprintPlacement
         {
@@ -668,7 +612,7 @@ public sealed class PcbPlacer
             FootprintLibId = first.Footprint,
             X              = x,
             Y              = y,
-            Rotation       = rot,
+            Rotation       = 0,
             Value          = first.Value,
             PadToNet       = ctx.PadToNetByRef[refDes],
             Def            = fp,
@@ -811,15 +755,13 @@ public sealed class PcbPlacer
     private static BBox SyntheticBBox(double halfX, double halfY) =>
         new(-halfX, -halfY, halfX, halfY);
 
-    private static BBox ComputeBBox(PcbPlacement local, HashSet<string> excludeRefs)
+    private static BBox ComputeBBox(PcbPlacement local)
     {
         if (local.Footprints.Count == 0) return new BBox(0, 0, 0, 0);
         double minX = double.PositiveInfinity, minY = double.PositiveInfinity;
         double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity;
-        int included = 0;
         foreach (var fp in local.Footprints)
         {
-            if (excludeRefs.Contains(fp.Ref)) continue;
             var bb = fp.Def?.BoundingBox ?? SyntheticBBox(2.5, 2.5);
             double fpMinX = fp.X + bb.MinX, fpMaxX = fp.X + bb.MaxX;
             double fpMinY = fp.Y + bb.MinY, fpMaxY = fp.Y + bb.MaxY;
@@ -827,9 +769,8 @@ public sealed class PcbPlacer
             if (fpMinY < minY) minY = fpMinY;
             if (fpMaxX > maxX) maxX = fpMaxX;
             if (fpMaxY > maxY) maxY = fpMaxY;
-            included++;
         }
-        return included == 0 ? new BBox(0, 0, 0, 0) : new BBox(minX, minY, maxX, maxY);
+        return new BBox(minX, minY, maxX, maxY);
     }
 
     private static bool TryD(SExpr e, out double v)

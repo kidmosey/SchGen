@@ -12,7 +12,6 @@ public static class BuildCommand
         string? outDir = null;
         var extraLibs = new List<string>();
         var schematicOnly = false;
-        string? variant = null;
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -30,10 +29,6 @@ public static class BuildCommand
                 case "--sch-only":
                     schematicOnly = true;
                     break;
-                case "--variant":
-                    if (i + 1 >= args.Length) { Console.Error.WriteLine("error: --variant needs a name"); return 2; }
-                    variant = args[++i];
-                    break;
                 default:
                     if (input is null) input = args[i];
                     else { Console.Error.WriteLine($"error: unexpected argument '{args[i]}'"); return 2; }
@@ -42,7 +37,7 @@ public static class BuildCommand
         }
         if (input is null || outDir is null)
         {
-            Console.Error.WriteLine("usage: schgen build <circuit.yaml> --out <dir> [--lib <path>]... [--variant <name>] [--schematic-only]");
+            Console.Error.WriteLine("usage: schgen build <circuit.yaml> --out <dir> [--lib <path>]... [--schematic-only]");
             return 2;
         }
 
@@ -52,11 +47,6 @@ public static class BuildCommand
         // pipeline sees regular sheets only and per-instance refdes stay
         // unique on the PCB.
         YamlLoader.ExpandTemplateInstances(doc);
-        // Stuff-variant filter: with --variant, keep only the sheets/components
-        // populated in that assembly variant (untagged = shared). Each variant
-        // emits a clean single-populate board from one base YAML.
-        if (variant is not null)
-            YamlLoader.FilterVariant(doc, variant);
         // Multi-unit symbols are authored one ComponentDef per unit; KiCad
         // treats Value/Footprint/Datasheet/BOM as symbol-wide, so stamp a
         // single canonical value across all units of each refdes before
@@ -99,7 +89,6 @@ public static class BuildCommand
         var schPlacement = placer.Run();
 
         var projectName = Path.GetFileNameWithoutExtension(input);
-        if (variant is not null) projectName += "-" + variant;
         new SchematicEmitter(doc, libs, schPlacement).Write(outDir, projectName);
 
         // --schematic-only stops here, leaving any existing .kicad_pcb in place.
