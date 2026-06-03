@@ -29,12 +29,34 @@ schgen build path/to/board.yaml --out out/dir/
 # out a new symbol before committing the path to libraries:.
 schgen build board.yaml --out out/ --lib /path/to/Extra.kicad_sym --lib /path/to/Another.kicad_sym
 
+# Build only the schematic, leaving any existing .kicad_pcb untouched.
+schgen build board.yaml --out out/ --schematic-only      # or --sch-only
+
+# Build one assembly stuff-variant: drops sheets/components not populated in
+# <name> and suffixes the project name with -<name> (see "Stuff-variants").
+schgen build board.yaml --out out/ --variant prod
+
+# Generate a grouped bill of materials (CSV) to a file, or stdout if no -o.
+# --variant restricts the BOM to one stuff-variant's populated parts.
+schgen bom board.yaml -o board-bom.csv
+schgen bom board.yaml --variant prod -o board-prod-bom.csv
+
 # Validate without writing
 schgen validate path/to/board.yaml
 
 # Dump per-symbol pin map (use this when authoring YAML for an unfamiliar part)
 schgen symbols path/to/Lib.kicad_sym
 ```
+
+Full argument reference:
+
+| Command | Required | Optional |
+|---|---|---|
+| `build <circuit.yaml>` | `--out`/`-o <dir>` | `--lib <path>` (repeatable), `--variant <name>`, `--schematic-only` / `--sch-only` |
+| `bom <circuit.yaml>` | — | `--variant <name>`, `-o` / `--out <out.csv>` (default stdout) |
+| `validate <circuit.yaml>` | — | — |
+| `symbols <lib.kicad_sym>` | — | — |
+| `install-stock-libs` | — | `--out <path>`, `--force` |
 
 Without an install, run directly from a SchGen checkout:
 
@@ -80,6 +102,14 @@ config:
   pcb_sheet_spacing: 20                 # mm between sheet placement regions on PCB
 
 power_nets: [GND, VCC_3V3, VCC_5V]      # auto-PWR_FLAG when no driver, global labels
+
+parts:                                  # optional sourcing catalog keyed by part
+  "10k":                                # name (a component's value, or the symbol
+    mpn: RC0402FR-0710KL                # name when value is blank). Supplies MPNs
+    manufacturer: Yageo                 # to the BOM once per distinct part instead
+  "USBLC6-2P6":                         # of repeating mpn: on every instance. A
+    mpn: USBLC6-2P6                     # component's own mpn: always wins.
+    manufacturer: STMicroelectronics
 
 includes:                               # split big boards across files (paths
   - sheets/power.yaml                   # are relative to the file that lists them)
@@ -174,6 +204,57 @@ sheets:
       M5: DDR_DQ0
       M6: DDR_DQ1
   # any pin not in bulk or named is still auto-NC
+```
+
+### Multi-unit parts (`units: all`)
+
+Instead of authoring one `ComponentDef` per unit of a multi-unit symbol, a single
+entry with `units: all` expands at build time into one entry per symbol unit
+(unit count comes from the resolved symbol). The shared `pins:` map and identity
+fields are cloned across every unit; per-unit by-name pins + `power_net_aliases`
+resolve to the right unit. Use this for big multi-unit SoCs/FPGAs wired from one
+entry.
+
+```yaml
+- ref: U_SOC
+  symbol: Rockchip:RK3566           # an 8-sub-unit symbol
+  footprint: Rockchip:RK3566_BGA565
+  units: all                        # → 8 ComponentDefs, units 1..8, shared pins
+  value: "RK3566"
+  pins: { 1A1: GND, VDD: VCC_1V8 }
+```
+
+### Stuff-variants (`variants:`)
+
+Tag sheets and/or components with the assembly variants they're populated in.
+`schgen build --variant X` (and `schgen bom --variant X`) keeps only what's
+populated in X; the build also suffixes the project name with `-X`. Tagging
+rules:
+
+- **Empty / absent `variants:`** = shared — present in every variant.
+- **Sheet `variants: [a, b]`** — the whole sheet (and its components) is dropped
+  unless the chosen variant is `a` or `b`; the sheet is also removed from
+  `root.instantiate`.
+- **Component `variants: [...]`** — overrides the sheet for that one component
+  (e.g. a bare-silicon-only regulator on an otherwise-shared power sheet).
+  A component with empty `variants:` inherits its sheet's tags.
+
+```yaml
+sheets:
+  power:                            # shared sheet
+    components:
+      - ref: U_IN                   # shared (present in every variant)
+        symbol: Device:Regulator
+        footprint: fp
+        pins: { VIN: V5 }
+      - ref: U_CORE
+        symbol: Device:Regulator
+        footprint: fp
+        variants: [prod]            # only in the "prod" variant
+        pins: { VIN: V5 }
+  mezz:
+    variants: [dev]                 # whole sheet only in the "dev" variant
+    components: [ ... ]
 ```
 
 ## How PCB placement works
@@ -283,7 +364,8 @@ Within a SchGen checkout:
 - `src/Schgen.Core/Yaml/` — model + loader + validator + library index.
 - `src/Schgen.Core/KiCad/` — SExpr DOM, SymbolLibrary, FootprintLibrary, SchematicEmitter, PcbEmitter.
 - `src/Schgen.Core/Placement/` — SchPlacer (seeded BFS + cap proximity + collision fan-out) and PcbPlacer (per-sheet region pack).
-- `src/Schgen.Cli/Commands/` — build, validate, symbols.
+- `src/Schgen.Core/Bom/` — BomBuilder (grouped BOM model + CSV emit).
+- `src/Schgen.Cli/Commands/` — build, bom, validate, symbols, install-stock-libs.
 - `tests/Schgen.Tests/` — xUnit tests. Run with `dotnet test`.
 
 When making changes:
