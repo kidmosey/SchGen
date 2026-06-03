@@ -11,6 +11,7 @@ public static class BuildCommand
         string? input = null;
         string? outDir = null;
         var extraLibs = new List<string>();
+        var schematicOnly = false;
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -24,6 +25,10 @@ public static class BuildCommand
                     if (i + 1 >= args.Length) { Console.Error.WriteLine("error: --lib needs a path"); return 2; }
                     extraLibs.Add(args[++i]);
                     break;
+                case "--schematic-only":
+                case "--sch-only":
+                    schematicOnly = true;
+                    break;
                 default:
                     if (input is null) input = args[i];
                     else { Console.Error.WriteLine($"error: unexpected argument '{args[i]}'"); return 2; }
@@ -32,7 +37,7 @@ public static class BuildCommand
         }
         if (input is null || outDir is null)
         {
-            Console.Error.WriteLine("usage: schgen build <circuit.yaml> --out <dir> [--lib <path>]...");
+            Console.Error.WriteLine("usage: schgen build <circuit.yaml> --out <dir> [--lib <path>]... [--schematic-only]");
             return 2;
         }
 
@@ -42,6 +47,12 @@ public static class BuildCommand
         // pipeline sees regular sheets only and per-instance refdes stay
         // unique on the PCB.
         YamlLoader.ExpandTemplateInstances(doc);
+        // Multi-unit symbols are authored one ComponentDef per unit; KiCad
+        // treats Value/Footprint/Datasheet/BOM as symbol-wide, so stamp a
+        // single canonical value across all units of each refdes before
+        // validation + emit (otherwise units past the first emit empty values
+        // and the schematic annotator rejects the part).
+        YamlLoader.ConsolidateMultiUnitFields(doc);
         var libs = LibraryIndex.FromDocument(doc, extraLibs);
 
         var report = Validator.Validate(doc, libs);
@@ -69,13 +80,24 @@ public static class BuildCommand
         if (Environment.GetEnvironmentVariable("SCHGEN_PLACER_TRACE") == "1")
             placer.Tracer = new TextWriterPlacementTracer(Console.Error);
         var schPlacement = placer.Run();
-        var pcbPlacement = new PcbPlacer(doc, libs, schPlacement).Run();
 
         var projectName = Path.GetFileNameWithoutExtension(input);
         new SchematicEmitter(doc, libs, schPlacement).Write(outDir, projectName);
-        new PcbEmitter(doc, libs, pcbPlacement).Write(outDir, projectName);
 
-        Console.Out.WriteLine($"schgen: wrote {projectName} to {outDir}");
+        // --schematic-only stops here, leaving any existing .kicad_pcb in place.
+        // Use it to re-emit schematics after a YAML edit without discarding the
+        // board outline, zones, vias, and routing the user has done in KiCad on
+        // top of an earlier placement (the PCB emitter rewrites the file from
+        // scratch). Re-sync the refreshed netlist/values into the board later
+        // via KiCad's "Update PCB from Schematic".
+        if (!schematicOnly)
+        {
+            var pcbPlacement = new PcbPlacer(doc, libs, schPlacement).Run();
+            new PcbEmitter(doc, libs, pcbPlacement).Write(outDir, projectName);
+        }
+
+        Console.Out.WriteLine(
+            $"schgen: wrote {projectName} to {outDir}{(schematicOnly ? " (schematic only)" : "")}");
         return 0;
     }
 }

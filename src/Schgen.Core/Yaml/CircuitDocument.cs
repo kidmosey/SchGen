@@ -67,14 +67,18 @@ public sealed class ComponentDef
     /// (this is how a multi-unit chip - e.g. a 11-unit FPGA - is expressed:
     /// one ComponentDef per unit, all with the same Ref).
     public int Unit { get; init; } = 1;
-    public string Footprint { get; init; } = "";             // "Lib:Name"
-    public string? Value { get; init; }
-    public string? Mpn { get; init; }
-    public string? Manufacturer { get; init; }
-    public string? Tolerance { get; init; }
-    public string? Voltage { get; init; }
-    public string? Datasheet { get; init; }
-    public bool Dnp { get; init; }
+    // Identity / BOM fields below are settable (not init-only) because they
+    // belong to the whole symbol, not the unit: `ConsolidateMultiUnitFields`
+    // stamps a single canonical value across every unit sharing this Ref so
+    // KiCad's annotator doesn't flag "different values for U2A and U2B".
+    public string Footprint { get; set; } = "";              // "Lib:Name"
+    public string? Value { get; set; }
+    public string? Mpn { get; set; }
+    public string? Manufacturer { get; set; }
+    public string? Tolerance { get; set; }
+    public string? Voltage { get; set; }
+    public string? Datasheet { get; set; }
+    public bool Dnp { get; set; }
     public (double X, double Y)? PcbAt { get; init; }
     public double? PcbRotate { get; init; }
     public (double X, double Y)? SchAt { get; init; }

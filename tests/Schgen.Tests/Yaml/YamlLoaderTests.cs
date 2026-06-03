@@ -524,4 +524,85 @@ public class YamlLoaderTests
         j.SchAt.Should().Be((120.0, 80.0));
         j.Dnp.Should().BeFalse();
     }
+
+    // A multi-unit symbol is authored one ComponentDef per unit; typically
+    // only the first unit declares value/datasheet/etc. KiCad treats those as
+    // symbol-wide, so ConsolidateMultiUnitFields must fan them out to every
+    // unit (otherwise the schematic annotator rejects "U2A vs U2B" mismatch).
+    private const string MultiUnitYaml = """
+        sheets:
+          fpga:
+            components:
+              - ref: U2
+                symbol: MyriadArc:BigFPGA
+                unit: 1
+                footprint: Intel:BGA484
+                value: "5CGTFD9C5F23I7N"
+                datasheet: "cyclone-v.pdf"
+                pins: { A1: GND }
+              - ref: U2
+                symbol: MyriadArc:BigFPGA
+                unit: 2
+                footprint: Intel:BGA484
+                pins: { B1: GND }
+              - ref: U2
+                symbol: MyriadArc:BigFPGA
+                unit: 3
+                footprint: Intel:BGA484
+                pins: { C1: GND }
+        root:
+          instantiate:
+            - sheet: fpga
+        """;
+
+    [Fact]
+    public void ConsolidateMultiUnitFields_fans_value_across_all_units()
+    {
+        var doc = YamlLoader.LoadText(MultiUnitYaml);
+        // Before consolidation only unit 1 carries the value.
+        doc.Sheets["fpga"].Components
+            .Count(c => string.IsNullOrEmpty(c.Value)).Should().Be(2);
+
+        YamlLoader.ConsolidateMultiUnitFields(doc);
+
+        var units = doc.Sheets["fpga"].Components;
+        units.Should().OnlyContain(c => c.Value == "5CGTFD9C5F23I7N");
+        units.Should().OnlyContain(c => c.Datasheet == "cyclone-v.pdf");
+        units.Should().OnlyContain(c => c.Footprint == "Intel:BGA484");
+    }
+
+    [Fact]
+    public void ConsolidateMultiUnitFields_throws_on_conflicting_values()
+    {
+        const string Conflict = """
+            sheets:
+              fpga:
+                components:
+                  - ref: U2
+                    symbol: MyriadArc:BigFPGA
+                    unit: 1
+                    value: "PART-A"
+                    pins: { A1: GND }
+                  - ref: U2
+                    symbol: MyriadArc:BigFPGA
+                    unit: 2
+                    value: "PART-B"
+                    pins: { B1: GND }
+            root:
+              instantiate:
+                - sheet: fpga
+            """;
+        var doc = YamlLoader.LoadText(Conflict);
+        var act = () => YamlLoader.ConsolidateMultiUnitFields(doc);
+        act.Should().Throw<FormatException>().WithMessage("*conflicting value*");
+    }
+
+    [Fact]
+    public void ConsolidateMultiUnitFields_leaves_single_unit_parts_untouched()
+    {
+        var doc = YamlLoader.LoadText(Minimal);
+        YamlLoader.ConsolidateMultiUnitFields(doc);
+        doc.Sheets["power"].Components.Single(c => c.Ref == "C1").Value.Should().Be("10uF");
+        doc.Sheets["power"].Components.Single(c => c.Ref == "U1").Value.Should().BeNull();
+    }
 }

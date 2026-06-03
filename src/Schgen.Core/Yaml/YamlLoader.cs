@@ -140,6 +140,80 @@ public static class YamlLoader
             doc.Root.Instantiate.Add(ni);
     }
 
+    /// Reconcile the identity / BOM fields of a multi-unit symbol.
+    ///
+    /// A multi-unit chip (e.g. an 11-unit FPGA) is authored as one
+    /// ComponentDef per unit, all sharing one Ref. KiCad, however, treats
+    /// Value / Footprint / Datasheet / DNP / BOM fields as properties of the
+    /// whole symbol, not the individual unit — the schematic annotator errors
+    /// out ("Different values for U2A and U2B") the moment two units disagree.
+    /// Authors naturally declare these fields on only one unit, so without
+    /// this pass the remaining units emit empty values.
+    ///
+    /// For each refdes, this picks the single declared value of each shared
+    /// field (treating null/empty as "not declared") and stamps it onto every
+    /// unit. Two units carrying *different* non-empty values for the same
+    /// field is an authoring mistake and throws.
+    ///
+    /// Run after `ExpandTemplateInstances` (which preserves units while making
+    /// per-instance refdes unique) so grouping by Ref maps one physical part.
+    public static void ConsolidateMultiUnitFields(CircuitDocument doc)
+    {
+        var byRef = new Dictionary<string, List<ComponentDef>>(StringComparer.Ordinal);
+        foreach (var sheet in doc.Sheets.Values)
+            foreach (var comp in sheet.Components)
+            {
+                if (string.IsNullOrEmpty(comp.Ref)) continue;
+                if (!byRef.TryGetValue(comp.Ref, out var list))
+                    byRef[comp.Ref] = list = new List<ComponentDef>();
+                list.Add(comp);
+            }
+
+        foreach (var (refdes, units) in byRef)
+        {
+            if (units.Count < 2) continue;
+
+            var value        = Reconcile(refdes, "value",        units.Select(u => u.Value));
+            var footprint    = Reconcile(refdes, "footprint",    units.Select(u => u.Footprint));
+            var mpn          = Reconcile(refdes, "mpn",          units.Select(u => u.Mpn));
+            var manufacturer = Reconcile(refdes, "manufacturer", units.Select(u => u.Manufacturer));
+            var tolerance    = Reconcile(refdes, "tolerance",    units.Select(u => u.Tolerance));
+            var voltage      = Reconcile(refdes, "voltage",      units.Select(u => u.Voltage));
+            var datasheet    = Reconcile(refdes, "datasheet",    units.Select(u => u.Datasheet));
+            var dnp          = units.Any(u => u.Dnp);
+
+            foreach (var u in units)
+            {
+                u.Value        = value;
+                u.Footprint    = footprint ?? "";
+                u.Mpn          = mpn;
+                u.Manufacturer = manufacturer;
+                u.Tolerance    = tolerance;
+                u.Voltage      = voltage;
+                u.Datasheet    = datasheet;
+                u.Dnp          = dnp;
+            }
+        }
+    }
+
+    /// Collapse the per-unit values of one shared field to a single declared
+    /// value, treating null/empty as "not declared". Throws on a genuine
+    /// conflict (two different non-empty values).
+    private static string? Reconcile(string refdes, string field, IEnumerable<string?> values)
+    {
+        string? chosen = null;
+        foreach (var v in values)
+        {
+            if (string.IsNullOrEmpty(v)) continue;
+            if (chosen is null) chosen = v;
+            else if (!string.Equals(chosen, v, StringComparison.Ordinal))
+                throw new FormatException(
+                    $"refdes '{refdes}': conflicting {field} across units ('{chosen}' vs '{v}'); " +
+                    "all units of a multi-unit symbol must agree");
+        }
+        return chosen;
+    }
+
     private static void LoadInto(CircuitDocument doc, string fullPath, HashSet<string> seen)
     {
         if (!seen.Add(fullPath))
