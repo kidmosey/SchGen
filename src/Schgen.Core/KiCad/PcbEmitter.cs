@@ -264,15 +264,69 @@ public sealed class PcbEmitter
                     output.Add(ConvertLegacyFpArc(child));
                     break;
 
+                case "zone":
+                    // Footprint-embedded zones (rule areas / keepouts) are
+                    // emitted with BOARD-ABSOLUTE polygon coordinates, NOT
+                    // footprint-local — this is what pcbnew writes when it
+                    // places a library footprint that contains zones, and
+                    // it's also how KiCad's render path expects them.
+                    // (Compare to pads, which DO stay footprint-local and
+                    // get the (at) transform at render time.)
+                    // Walk the zone's (polygon (pts (xy …) …)) subtree and
+                    // rewrite every (xy lx ly) leaf to (xy ax ay) by
+                    // applying the footprint's placement transform.
+                    output.Add(TransformZonePolygons(child, fp.X, fp.Y, fp.Rotation));
+                    break;
+
                 default:
                     // fp_line, fp_rect, fp_circle, fp_poly, model,
-                    // attr, descr, tags, zone, ... - copy verbatim.
+                    // attr, descr, tags, ... - copy verbatim.
                     output.Add(CloneSExpr(child));
                     break;
             }
         }
 
         return new SList(output);
+    }
+
+    /// Rewrite every `(xy lx ly)` leaf inside `zone` to its board-absolute
+    /// equivalent under the footprint's `(at fpX fpY rotDeg)` placement.
+    /// Other zone children (layer, uuid, hatch, connect_pads, min_thickness,
+    /// keepout, placement, fill, …) pass through unchanged.
+    ///
+    /// Rotation follows KiCad's convention: positive `rotDeg` rotates CCW in
+    /// the lib-local frame (screen Y points down, so the rotation matrix has
+    /// `+sin` on the off-diagonal). Verified against the user-supplied
+    /// `hardware/kicad/sample/sample/sample.kicad_pcb` at zero rotation,
+    /// where `absX = lx + fpX` and `absY = ly + fpY` reproduce the sample
+    /// polygon coords exactly.
+    internal static SExpr TransformZonePolygons(SList zone, double fpX, double fpY, double rotDeg)
+    {
+        double rad  = rotDeg * Math.PI / 180.0;
+        double cosT = Math.Cos(rad);
+        double sinT = Math.Sin(rad);
+
+        SExpr Transform(SExpr node)
+        {
+            if (node is SAtom a) return new SAtom(a.Value, a.Quoted);
+            var list = (SList)node;
+            if (list.Head == "xy"
+                && list.Items.Count >= 3
+                && list.Items[1] is SAtom xa
+                && list.Items[2] is SAtom ya
+                && double.TryParse(xa.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double lx)
+                && double.TryParse(ya.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double ly))
+            {
+                double rx = lx * cosT - ly * sinT;
+                double ry = lx * sinT + ly * cosT;
+                return new SList(
+                    SAtom.Sym("xy"),
+                    SAtom.Num(rx + fpX),
+                    SAtom.Num(ry + fpY));
+            }
+            return new SList(list.Items.Select(Transform).ToList());
+        }
+        return Transform(zone);
     }
 
     /// Drop a `(net N "name")` after the pad's `(layers ...)` block (canonical

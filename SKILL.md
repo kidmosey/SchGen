@@ -176,6 +176,13 @@ sheets:
   # any pin not in bulk or named is still auto-NC
 ```
 
+## How PCB placement works
+
+- **Sheets are placement clusters.** Each YAML sheet becomes one cluster on the PCB. Inside a cluster, the chip with the most pads anchors at the cluster origin and every other component places radially around it based on net connectivity to the anchor. The cluster's bounding box is then arranged on the board.
+- **Cluster arrangement.** The largest-area cluster (typically the SoC sheet) sits at the board centre. The remaining clusters arrange around it in order of cluster-cluster shared-net count, using the same collision-avoiding hop walk that places components within a cluster. Multi-unit chips that span sheets are assigned to one owner sheet — whichever contributes the most pad-net wiring.
+- **Edge-class clusters** (sheets dominated by board-edge connectors — USB, microSD, HDMI, barrel jack, RJ45, audio jack) are detected by symbol-library prefix and placed against the nearest free board edge instead of in the radial flow. No YAML annotation needed.
+- **`pcb_at` overrides still apply.** A `pcb_at` on the cluster's anchor PINS the whole cluster to that absolute board coordinate. A `pcb_at` on a peripheral pins just that one component. Both bypass the cluster placer for the pinned component while everything else continues to auto-layout.
+
 ## How nets work
 
 - **Same net name = same net.** `U1.VOUT → VCC_3V3` and `J_OUT.1 → VCC_3V3` join automatically.

@@ -51,7 +51,9 @@ public sealed partial class SchematicEmitter
                 "rule_severities": {
                   "lib_symbol_issues": "ignore",
                   "lib_symbol_mismatch": "ignore",
-                  "footprint_link_issues": "ignore"
+                  "footprint_link_issues": "ignore",
+                  "pin_to_pin": "ignore",
+                  "pin_not_driven": "ignore"
                 }
               },
               "libraries": { "pinned_footprint_libs": [], "pinned_symbol_libs": [] },

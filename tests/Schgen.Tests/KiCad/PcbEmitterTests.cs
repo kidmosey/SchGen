@@ -211,6 +211,69 @@ public class PcbEmitterTests
         converted.First("angle").Should().BeNull();
     }
 
+    /// pcbnew pre-transforms footprint-embedded zone polygon points to
+    /// board-absolute coordinates when it places a library footprint, and
+    /// KiCad's render path expects that representation. Schgen needs to
+    /// match. This is the zero-rotation case, which the user-supplied
+    /// sample.kicad_pcb already verifies (footprint at (165.745, 79.245),
+    /// source polygon point at (-6.475, -4.025), pcbnew-saved point at
+    /// (159.27, 75.22)).
+    [Fact]
+    public void TransformZonePolygons_zero_rotation_adds_footprint_anchor()
+    {
+        // (zone (layer "F.Cu") (keepout (tracks not_allowed) …)
+        //       (polygon (pts (xy -4.925 -1.525) (xy 3.575 -1.525)
+        //                     (xy 3.575 0.475)  (xy -4.925 0.475))))
+        var zone = (SList)SExpr.Parse(
+            """
+            (zone
+              (layer "F.Cu")
+              (keepout (tracks not_allowed) (vias not_allowed) (pads not_allowed)
+                       (copperpour not_allowed) (footprints not_allowed))
+              (polygon
+                (pts (xy -4.925 -1.525) (xy 3.575 -1.525)
+                     (xy 3.575 0.475)  (xy -4.925 0.475))))
+            """);
+
+        var transformed = (SList)PcbEmitter.TransformZonePolygons(zone, fpX: 172.85, fpY: 135.39, rotDeg: 0);
+
+        // Other zone children (layer, keepout) should pass through unchanged.
+        transformed.Head.Should().Be("zone");
+        transformed.First("layer").Should().NotBeNull();
+        transformed.First("keepout").Should().NotBeNull();
+
+        // Polygon points should be lib-local + footprint anchor.
+        var pts = transformed.First("polygon")!.First("pts")!.All("xy").ToList();
+        pts.Should().HaveCount(4);
+        ReadXY(pts[0]).Should().Be((172.85 - 4.925, 135.39 - 1.525));
+        ReadXY(pts[1]).Should().Be((172.85 + 3.575, 135.39 - 1.525));
+        ReadXY(pts[2]).Should().Be((172.85 + 3.575, 135.39 + 0.475));
+        ReadXY(pts[3]).Should().Be((172.85 - 4.925, 135.39 + 0.475));
+    }
+
+    /// 90° rotation: a point (1, 0) in lib-local frame goes to (0, 1) under
+    /// KiCad's positive-CCW-with-screen-Y-down rotation matrix (cos 90 = 0,
+    /// sin 90 = 1, so rx = -ly, ry = lx), then the anchor is added.
+    [Fact]
+    public void TransformZonePolygons_rotation_applies_KiCad_rotation_matrix()
+    {
+        var zone = (SList)SExpr.Parse(
+            """
+            (zone (layer "F.Cu") (keepout (tracks not_allowed))
+              (polygon (pts (xy 1 0) (xy 0 1) (xy -1 0))))
+            """);
+
+        var transformed = (SList)PcbEmitter.TransformZonePolygons(zone, fpX: 100, fpY: 100, rotDeg: 90);
+        var pts = transformed.First("polygon")!.First("pts")!.All("xy").ToList();
+
+        ReadXY(pts[0]).Should().Match<(double, double)>(p
+            => Math.Abs(p.Item1 - 100) < 1e-9 && Math.Abs(p.Item2 - 101) < 1e-9);
+        ReadXY(pts[1]).Should().Match<(double, double)>(p
+            => Math.Abs(p.Item1 -  99) < 1e-9 && Math.Abs(p.Item2 - 100) < 1e-9);
+        ReadXY(pts[2]).Should().Match<(double, double)>(p
+            => Math.Abs(p.Item1 - 100) < 1e-9 && Math.Abs(p.Item2 -  99) < 1e-9);
+    }
+
     private static (double x, double y) ReadXY(SList node)
     {
         double x = double.Parse(((SAtom)node.Items[1]).Value,
