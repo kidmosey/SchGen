@@ -292,11 +292,12 @@ sheets:
    ```bash
    schgen build board.yaml --out hardware/kicad/board/
    ```
-5. **Run KiCad ERC** to confirm electrical correctness:
+5. **Run KiCad ERC** to confirm electrical correctness (needs KiCad 10's
+   `kicad-cli` on `$PATH`; if you only have a KiCad AppImage, prefix the command
+   with `path/to/KiCad.AppImage --appimage-extract-and-run`):
    ```bash
-   ~/bin/kicad/kicad-10.0.1-1-x86_64.AppImage --appimage-extract-and-run \
-       kicad-cli sch erc hardware/kicad/board/board.kicad_sch \
-       --severity-error -o /tmp/erc.txt
+   kicad-cli sch erc hardware/kicad/board/board.kicad_sch \
+       --severity-error -o erc.txt
    ```
    `lib_symbol_mismatch` and `lib_footprint_mismatch` are pre-silenced in the generated `.kicad_pro` since schgen embeds source-verbatim symbols.
 

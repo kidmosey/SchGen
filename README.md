@@ -16,8 +16,8 @@ Two one-time steps per machine — after these, every project on the machine can
 
 ```bash
 # 1. Install the CLI as a global .NET tool.
-git clone <your-fork-or-mirror> ~/Projects/SchGen
-cd ~/Projects/SchGen
+git clone https://github.com/kidmosey/SchGen.git
+cd SchGen
 dotnet pack -c Release src/Schgen.Cli
 dotnet tool install --global --add-source ./nupkg SchGen
 
@@ -71,8 +71,6 @@ ls out/
 ```
 
 See [`examples/minimal.yaml`](examples/minimal.yaml) for the smallest exerciser, [`examples/template_params.yaml`](examples/template_params.yaml) for templates with parameter remapping, and [`examples/multi_file/`](examples/multi_file/) for a board split across multiple YAML files using `includes:`.
-
-For production-scale examples, the MyriadArc cartridge-console project (where SchGen was extracted from) has five live board YAMLs under [`hardware/kicad/`](https://github.com/your-org/MyriadArc.com/tree/main/hardware/kicad) — cart-pcb, cart-programmer, cart-row-pcb, console-board, and console-programmer. They exercise multi-unit symbols, BGAs with `bulk:` pin attribution, hierarchical sheets via `includes:`, real PMICs / SoCs / FPGAs, and the `host:` cap-proximity override across hundreds of components.
 
 ## Consuming from another project
 
